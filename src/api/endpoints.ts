@@ -21,6 +21,7 @@ import type {
   Subject,
   SubjectInput,
   Teacher,
+  TeacherInput,
   TimetableDetail,
   TimetableLoad,
   TimetableSummary,
@@ -53,7 +54,17 @@ export const schoolApi = {
   /** 409, якщо предмет є в навчальному плані. */
   archiveSubject: (id: string) => api.delete<void>(`/school/subjects/${encodeURIComponent(id)}`),
   listTeachers: () => api.get<Teacher[]>('/school/teachers'),
+  createTeacher: (body: TeacherInput) => api.post<Teacher>('/school/teachers', body),
+  updateTeacher: (id: string, body: TeacherInput) =>
+    api.put<Teacher>(`/school/teachers/${encodeURIComponent(id)}`, body),
+  /** Етап 2 · видалення даних вчителя (ст. 15): лишається «Вчитель #N»; 409, якщо він у плані. */
+  deleteTeacher: (id: string) => api.delete<void>(`/school/teachers/${encodeURIComponent(id)}`),
+  /** Етап 2 · експорт даних вчителя (ст. 8), частина school-service. */
+  exportTeacher: (id: string) =>
+    api.get<Record<string, unknown>>(`/school/teachers/${encodeURIComponent(id)}/export`),
   getCurriculum: () => api.get<CurriculumRow[]>('/school/curriculum'),
+  /** Увесь план одним запитом: клас × предмет → вчитель, годин на тиждень. */
+  putCurriculum: (rows: CurriculumRow[]) => api.put<CurriculumRow[]>('/school/curriculum', rows),
   audit: (q: { from: string; to: string; target?: string }) =>
     api.get<AuditEntry[]>('/school/audit', { query: q }),
 };
@@ -84,6 +95,9 @@ export const timetableApi = {
   putAlertHours: (date: string, minutes: number) =>
     api.put<unknown>(`/timetable/alert-hours/${date}`, { minutes }),
 
+  /** Етап 2 · частина експорту вчителя з timetable: уроки у версіях, відсутності, заміни. */
+  exportTeacher: (id: string) =>
+    api.get<Record<string, unknown>>(`/timetable/teachers/${encodeURIComponent(id)}/export`),
   getHolidays: () => api.get<Holidays>('/timetable/holidays'),
   putHolidays: (body: Holidays) => api.put<Holidays>('/timetable/holidays', body),
 

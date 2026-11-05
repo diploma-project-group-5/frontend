@@ -4,6 +4,7 @@ import type {
   AlertHours,
   AlertPlan,
   AuditEntry,
+  CurriculumRow,
   Job,
   PublicDay,
   PublicTimetable,
@@ -41,6 +42,7 @@ current.effective_from = '2026-09-01';
 current.published_at = '2026-08-25T10:00:00Z';
 current.created_at = '2026-08-20T10:00:00Z';
 versions.set(current.timetable_id, current);
+d.plan.push(...d.curriculum(current)); // план закладу відповідає чинній версії
 
 // погоджений розклад тривог із сіду (шаблон kind='alert', модель 1.2)
 function makeAlertTemplate(seed: number) {
@@ -151,7 +153,7 @@ const problem = (status: number, code: string, title: string, extra: object = {}
 const notFound = () => problem(404, 'not_found', 'Not Found');
 
 /** Кожна зміна даних закладу: snapshot_version + 1, версії «дані змінилися», запис журналу. */
-function dataChanged(action: string, target: string, details: Record<string, unknown> = {}) {
+function dataChanged(action: string, target: string | null, details: Record<string, unknown> = {}) {
   d.profile.snapshot_version++;
   for (const v of versions.values()) if (v.state === 'validated') v.data_changed_since_build = true;
   audit(action, target, details);
@@ -308,7 +310,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
       return json(200, x);
     }
     if (method === 'DELETE') {
-      if (d.curriculum(current).some((r) => r.subject_id === x.subject_id)) {
+      if (d.plan.some((r) => r.subject_id === x.subject_id && r.hours_per_week > 0)) {
         return problem(409, 'subject_in_curriculum', 'Предмет є в навчальному плані');
       }
       x.archived_at = new Date().toISOString();
@@ -328,8 +330,92 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     audit(f ? 'Задано канікули' : 'Прибрано канікули', null, f ? { з: f, по: t } : {});
     return json(200, holidays);
   }
+  // ── вчителі: підпис, ліміт, недоступні дні; етап 2 — видалення (ст. 15) і експорт (ст. 8) ──
+  if (path === '/school/teachers' && method === 'POST') {
+    if (d.teachers.some((t) => !t.deleted_at && t.label === body.label)) {
+      return problem(409, 'label_taken', 'Підпис має бути унікальним');
+    }
+    const no = Math.max(0, ...d.teachers.map((t) => t.teacher_no)) + 1;
+    const t = { teacher_id: `t${Date.now()}`, teacher_no: no, ...body, deleted_at: null };
+    d.teachers.push(t);
+    dataChanged('Додано вчителя', `Вчитель #${no}`, { QR: 'видано' });
+    return json(201, t);
+  }
+  if ((m = path.match(/^\/(school|timetable)\/teachers\/([^/]+)\/export$/))) {
+    const t = d.teachers.find((x) => x.teacher_id === m![2] && !x.deleted_at);
+    if (!t) return notFound();
+    const ref = `Вчитель #${t.teacher_no}`;
+    if (m[1] === 'school') {
+      audit('Експортовано дані вчителя', ref, { підстава: 'запит особи (ст. 8)' });
+      return json(200, {
+        teacher_id: t.teacher_id,
+        teacher_no: t.teacher_no,
+        label: t.label,
+        weekly_hours_limit: t.weekly_hours_limit,
+        unavailable_days: t.unavailable_days,
+        curriculum: d.plan.filter((r) => r.teacher_id === t.teacher_id),
+        audit_entries: auditLog.filter((e) => e.target === ref).length,
+      });
+    }
+    return json(200, {
+      lessons: [...versions.values()]
+        .filter((v) => v.kind === 'main')
+        .map((v) => ({
+          timetable_id: v.timetable_id,
+          state: v.state,
+          lessons: v.lessons.filter((l) => l.teacher_id === t.teacher_id).length,
+        })),
+      absences: [],
+      substitutions: [],
+    });
+  }
+  if ((m = path.match(/^\/school\/teachers\/([^/]+)$/))) {
+    const t = d.teachers.find((x) => x.teacher_id === m![1] && !x.deleted_at);
+    if (!t) return notFound();
+    if (method === 'PUT') {
+      if (d.teachers.some((x) => x !== t && !x.deleted_at && x.label === body.label)) {
+        return problem(409, 'label_taken', 'Підпис має бути унікальним');
+      }
+      Object.assign(t, body);
+      dataChanged('Змінено дані вчителя', `Вчитель #${t.teacher_no}`);
+      return json(200, t);
+    }
+    if (method === 'DELETE') {
+      if (d.plan.some((r) => r.teacher_id === t.teacher_id && r.hours_per_week > 0)) {
+        return problem(409, 'teacher_in_curriculum', 'Вчителя призначено в навчальному плані');
+      }
+      const ref = `Вчитель #${t.teacher_no}`;
+      t.label = ref;
+      t.deleted_at = new Date().toISOString();
+      // timetable ставить «Вчитель #N» у копіях підписів у версіях (school.data.changed)
+      for (const v of versions.values())
+        for (const x of v.teachers) if (x.teacher_id === t.teacher_id) x.label = ref;
+      dataChanged('Видалено дані вчителя', ref, { QR: 'відкликано' });
+      return new Response(null, { status: 204 });
+    }
+  }
   if (path === '/school/teachers') return json(200, d.teachers);
-  if (path === '/school/curriculum') return json(200, d.curriculum(current));
+
+  if (path === '/school/curriculum' && method === 'PUT') {
+    const rows = body as CurriculumRow[];
+    const bad = rows.find(
+      (r) =>
+        !d.classes.some((c) => c.class_id === r.class_id) ||
+        !d.subjects.some((x) => x.subject_id === r.subject_id && !x.archived_at) ||
+        !d.teachers.some((t) => t.teacher_id === r.teacher_id && !t.deleted_at) ||
+        !(r.hours_per_week > 0),
+    );
+    if (bad)
+      return problem(
+        422,
+        'curriculum_invalid',
+        'Рядок плану з невідомим класом, предметом чи вчителем',
+      );
+    d.plan.splice(0, d.plan.length, ...rows);
+    dataChanged('Змінено навчальний план', null, { рядків: rows.length });
+    return json(200, d.plan);
+  }
+  if (path === '/school/curriculum') return json(200, d.plan);
   if (path === '/school/audit') {
     const from = url.searchParams.get('from') ?? '';
     const to = url.searchParams.get('to') ?? '9999';

@@ -103,3 +103,174 @@
 .check input {
   margin-top: 4px;
 }
+
+.chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.fieldset legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.checks label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 11px;
+  cursor: pointer;
+  font-size: 13px;
+  background: var(--surface);
+}
+.checks label:has(input:checked) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+.checks input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.json {
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  overflow: auto;
+  font-family: var(--m, ui-monospace, monospace);
+  font-size: 12.5px;
+  max-height: 320px;
+}
+
+/* навчальний план: master-detail як у прототипі */
+.md {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .md {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.mlist {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 6px;
+  background: var(--surface2);
+  display: flex;
+  flex-direction: column;
+}
+.mlist button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 9px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.mlist button[aria-current='true'] {
+  background: var(--surface);
+  box-shadow: var(--sh);
+  font-weight: 600;
+}
+.mdBody {
+  min-width: 0;
+}
+.mdHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-size: 16px;
+}
+.tw {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.dim {
+  opacity: 0.55;
+}
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.stepper button {
+  border: 0;
+  background: var(--surface2);
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-weight: 600;
+  color: inherit;
+}
+.stepper button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.stepper span {
+  min-width: 30px;
+  text-align: center;
+}
+.tsel {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 5px 8px;
+  min-width: 180px;
+  max-width: 100%;
+}
+.miss {
+  border-color: var(--bad);
+}
+
+.saveBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: var(--r2);
+  background: color-mix(in srgb, var(--ok, var(--accent)) 10%, transparent);
+}
+.saveBarDirty {
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+.saveActs {
+  display: inline-flex;
+  gap: 8px;
+}
+.errGap {
+  margin-bottom: 12px;
+}

@@ -133,7 +133,11 @@ export interface Teacher {
   label: string; // підпис: «Іваненко О. П.» або «Математика-1»
   weekly_hours_limit: number;
   unavailable_days: Day[];
+  /** етап 2: після видалення (ст. 15) лишається лише «Вчитель #N» */
+  deleted_at?: IsoDateTime | null;
 }
+
+export type TeacherInput = Pick<Teacher, 'label' | 'weekly_hours_limit' | 'unavailable_days'>;
 
 export interface CurriculumRow {
   class_id: Uuid;

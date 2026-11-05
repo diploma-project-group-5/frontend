@@ -110,40 +110,69 @@ function dayLoad(day: Day, lessons: Lesson[], formats: ClassDayFormat[]) {
 function fitCapacity(lessons: Lesson[], formats: ClassDayFormat[]) {
   const limit = profile.shelter_capacity!;
   for (const day of DAYS) {
-    const order = [...classes].sort(
+    const order = [...classes.filter((c) => !c.archived_at)].sort(
       (a, b) =>
         Number(a.in_person_priority) - Number(b.in_person_priority) || a.students - b.students,
     );
     for (const c of order) {
       if (dayLoad(day, lessons, formats) <= limit) break;
-      const f = formats.find((x) => x.class_id === c.class_id && x.day === day)!;
-      f.format = 'remote';
+      const f = formats.find((x) => x.class_id === c.class_id && x.day === day);
+      if (f) f.format = 'remote';
     }
   }
 }
 
-/** Детермінована «побудова»: зсув предметів по класах і днях; seed змінює розклад. */
+/** Навчальний план закладу (GET/PUT /curriculum); заповнюється з чинної версії під час старту. */
+export const plan: CurriculumRow[] = [];
+
+/**
+ * Детермінована «побудова»: якщо план є — розкладає його години по днях і уроках,
+ * інакше зсуває предмети по класах і днях; seed змінює розклад.
+ */
 export function makeTimetable(id: string, seed: number): TimetableDetail {
   const lessons: Lesson[] = [];
   const day_formats: ClassDayFormat[] = [];
-  classes.forEach((c, ci) => {
-    for (const day of DAYS) {
-      // один дистанційний день на клас; пріоритетні класи частіше лишаються очно
-      const remoteDay = ((ci + seed) % 5) + 1;
-      const remote = day === remoteDay && !(c.in_person_priority && (ci + day) % 2 === 0);
-      day_formats.push({ class_id: c.class_id, day, format: remote ? 'remote' : 'in_person' });
-      for (let n = 1; n <= 6; n++) {
-        const si = (ci + day * 3 + n + seed) % subjects.length;
-        lessons.push({
-          class_id: c.class_id,
-          day,
-          lesson_no: n,
-          subject_id: subjects[si]!.subject_id,
-          teacher_id: teachers[si]!.teacher_id,
-        });
+  const perDay = profile.lessons_per_day ?? 6;
+  classes
+    .filter((c) => !c.archived_at)
+    .forEach((c, ci) => {
+      for (const day of DAYS) {
+        // один дистанційний день на клас; пріоритетні класи частіше лишаються очно
+        const remoteDay = ((ci + seed) % 5) + 1;
+        const remote = day === remoteDay && !(c.in_person_priority && (ci + day) % 2 === 0);
+        day_formats.push({ class_id: c.class_id, day, format: remote ? 'remote' : 'in_person' });
       }
-    }
-  });
+      const rows = plan.filter((r) => r.class_id === c.class_id && r.hours_per_week > 0);
+      if (plan.length) {
+        const queue = rows.flatMap((r) => Array<CurriculumRow>(r.hours_per_week).fill(r));
+        const shift = queue.length ? (ci + seed) % queue.length : 0;
+        const ordered = [...queue.slice(shift), ...queue.slice(0, shift)];
+        ordered.forEach((r, k) => {
+          const lesson_no = Math.floor(k / DAYS.length) + 1;
+          if (lesson_no > perDay) return; // понад максимум — «не розміщено»
+          lessons.push({
+            class_id: c.class_id,
+            day: DAYS[k % DAYS.length]!,
+            lesson_no,
+            subject_id: r.subject_id,
+            teacher_id: r.teacher_id,
+          });
+        });
+        return;
+      }
+      for (const day of DAYS) {
+        for (let n = 1; n <= 6; n++) {
+          const si = (ci + day * 3 + n + seed) % subjects.length;
+          lessons.push({
+            class_id: c.class_id,
+            day,
+            lesson_no: n,
+            subject_id: subjects[si]!.subject_id,
+            teacher_id: teachers[si]!.teacher_id,
+          });
+        }
+      }
+    });
   fitCapacity(lessons, day_formats);
   return {
     timetable_id: id,
@@ -155,7 +184,9 @@ export function makeTimetable(id: string, seed: number): TimetableDetail {
     data_changed_since_build: false,
     created_at: new Date().toISOString(),
     snapshot_version: profile.snapshot_version,
-    classes: classes.map(({ class_id, name }) => ({ class_id, name })),
+    classes: classes
+      .filter((c) => !c.archived_at)
+      .map(({ class_id, name }) => ({ class_id, name })),
     teachers: teachers.map(({ teacher_id, label }) => ({ teacher_id, label })),
     lessons,
     day_formats,
@@ -243,15 +274,17 @@ export function tokens(): AccessToken[] {
           c.class_id === 'c1' ? 'demo-class' : `demo-${c.class_id}`,
         ),
       ),
-    ...teachers.map((t, i) =>
-      make(
-        'teacher',
-        `qt${i + 1}`,
-        t.teacher_id,
-        t.label,
-        i === 0 ? 'demo-teacher' : `demo-t${i + 1}`,
+    ...teachers
+      .filter((t) => !t.deleted_at) // видалений вчитель — QR відкликано
+      .map((t) =>
+        make(
+          'teacher',
+          `q-${t.teacher_id}`,
+          t.teacher_id,
+          t.label,
+          t.teacher_id === 't1' ? 'demo-teacher' : `demo-${t.teacher_id}`,
+        ),
       ),
-    ),
   ];
 }
 
