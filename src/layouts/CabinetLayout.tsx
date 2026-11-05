@@ -32,7 +32,7 @@ export function CabinetLayout() {
             <IconSchool />
           </span>
           <span className={s.bn}>
-            Лад<small>розклад з урахуванням укриття</small>
+            Лад<small>{isAdmin ? 'системна адміністрація' : 'розклад з урахуванням укриття'}</small>
           </span>
         </div>
         {nav.map(([to, label, Icon]) => (
