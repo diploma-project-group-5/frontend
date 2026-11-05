@@ -4,6 +4,7 @@ import type {
   CurriculumRow,
   Day,
   Lesson,
+  SchoolClass,
   SchoolListItem,
   SchoolProfile,
   Subject,
@@ -34,7 +35,7 @@ export const bells = [
   ['13:25', '14:10'],
 ].map(([start, end], i) => ({ lesson_no: i + 1, start: start!, end: end! }));
 
-export const classes = (
+export const classes: SchoolClass[] = (
   [
     ['5-А', 28, true],
     ['5-Б', 26, false],
@@ -231,9 +232,17 @@ export function tokens(): AccessToken[] {
     url: `${origin}/${scope === 'class' ? 'c' : 't'}#${hash}`,
   });
   return [
-    ...classes.map((c, i) =>
-      make('class', `qc${i + 1}`, c.class_id, c.name, i === 0 ? 'demo-class' : `demo-c${i + 1}`),
-    ),
+    ...classes
+      .filter((c) => !c.archived_at) // архівований клас — QR відкликано
+      .map((c) =>
+        make(
+          'class',
+          `q-${c.class_id}`,
+          c.class_id,
+          c.name,
+          c.class_id === 'c1' ? 'demo-class' : `demo-${c.class_id}`,
+        ),
+      ),
     ...teachers.map((t, i) =>
       make(
         'teacher',

@@ -5,7 +5,9 @@ import type {
   AlertPlan,
   AuditEntry,
   Bell,
+  ClassInput,
   CurriculumRow,
+  Holidays,
   Job,
   JobAccepted,
   PublicTimetable,
@@ -17,6 +19,7 @@ import type {
   SchoolRegistered,
   SchoolRegistration,
   Subject,
+  SubjectInput,
   Teacher,
   TimetableDetail,
   TimetableLoad,
@@ -38,7 +41,17 @@ export const schoolApi = {
   getBells: () => api.get<Bell[]>('/school/bells'),
   putBells: (bells: Bell[]) => api.put<Bell[]>('/school/bells', bells),
   listClasses: () => api.get<SchoolClass[]>('/school/classes'),
+  createClass: (body: ClassInput) => api.post<SchoolClass>('/school/classes', body),
+  updateClass: (id: string, body: ClassInput) =>
+    api.put<SchoolClass>(`/school/classes/${encodeURIComponent(id)}`, body),
+  /** «Видалення» класу = архівування (archived_at); його QR стає недійсним. */
+  archiveClass: (id: string) => api.delete<void>(`/school/classes/${encodeURIComponent(id)}`),
   listSubjects: () => api.get<Subject[]>('/school/subjects'),
+  createSubject: (body: SubjectInput) => api.post<Subject>('/school/subjects', body),
+  updateSubject: (id: string, body: SubjectInput) =>
+    api.put<Subject>(`/school/subjects/${encodeURIComponent(id)}`, body),
+  /** 409, якщо предмет є в навчальному плані. */
+  archiveSubject: (id: string) => api.delete<void>(`/school/subjects/${encodeURIComponent(id)}`),
   listTeachers: () => api.get<Teacher[]>('/school/teachers'),
   getCurriculum: () => api.get<CurriculumRow[]>('/school/curriculum'),
   audit: (q: { from: string; to: string; target?: string }) =>
@@ -70,6 +83,9 @@ export const timetableApi = {
     api.get<AlertHours>('/timetable/alert-hours', { query: { from, to } }),
   putAlertHours: (date: string, minutes: number) =>
     api.put<unknown>(`/timetable/alert-hours/${date}`, { minutes }),
+
+  getHolidays: () => api.get<Holidays>('/timetable/holidays'),
+  putHolidays: (body: Holidays) => api.put<Holidays>('/timetable/holidays', body),
 
   accessTokens: (type: TokenScope) =>
     api.get<AccessToken[]>('/timetable/access-tokens', { query: { type } }),

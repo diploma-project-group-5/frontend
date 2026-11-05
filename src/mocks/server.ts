@@ -150,6 +150,18 @@ const problem = (status: number, code: string, title: string, extra: object = {}
 
 const notFound = () => problem(404, 'not_found', 'Not Found');
 
+/** Кожна зміна даних закладу: snapshot_version + 1, версії «дані змінилися», запис журналу. */
+function dataChanged(action: string, target: string, details: Record<string, unknown> = {}) {
+  d.profile.snapshot_version++;
+  for (const v of versions.values()) if (v.state === 'validated') v.data_changed_since_build = true;
+  audit(action, target, details);
+}
+
+const holidays: { holiday_from: string | null; holiday_to: string | null } = {
+  holiday_from: '2026-12-28',
+  holiday_to: '2027-01-10',
+};
+
 function jobView(id: string): Job | undefined {
   const j = jobs.get(id);
   if (!j) return undefined;
@@ -259,8 +271,63 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
   }
   if (path === '/school/school') return json(200, d.profile);
   if (path === '/school/bells') return json(200, d.bells);
+  if (path === '/school/classes' && method === 'POST') {
+    const c = { class_id: `c${Date.now()}`, ...body, archived_at: null };
+    d.classes.push(c);
+    dataChanged(`Додано клас`, c.name);
+    return json(201, c);
+  }
+  if ((m = path.match(/^\/school\/classes\/([^/]+)$/))) {
+    const c = d.classes.find((x) => x.class_id === m![1]);
+    if (!c) return notFound();
+    if (method === 'PUT') {
+      Object.assign(c, body);
+      dataChanged('Змінено клас', c.name);
+      return json(200, c);
+    }
+    if (method === 'DELETE') {
+      c.archived_at = new Date().toISOString();
+      dataChanged('Архівовано клас', c.name, { QR: 'відкликано' });
+      return new Response(null, { status: 204 });
+    }
+  }
   if (path === '/school/classes') return json(200, d.classes);
+
+  if (path === '/school/subjects' && method === 'POST') {
+    const x = { subject_id: `s${Date.now()}`, ...body, archived_at: null };
+    d.subjects.push(x);
+    dataChanged('Додано предмет', x.name);
+    return json(201, x);
+  }
+  if ((m = path.match(/^\/school\/subjects\/([^/]+)$/))) {
+    const x = d.subjects.find((y) => y.subject_id === m![1]);
+    if (!x) return notFound();
+    if (method === 'PUT') {
+      Object.assign(x, body);
+      dataChanged('Змінено предмет', x.name);
+      return json(200, x);
+    }
+    if (method === 'DELETE') {
+      if (d.curriculum(current).some((r) => r.subject_id === x.subject_id)) {
+        return problem(409, 'subject_in_curriculum', 'Предмет є в навчальному плані');
+      }
+      x.archived_at = new Date().toISOString();
+      dataChanged('Архівовано предмет', x.name);
+      return new Response(null, { status: 204 });
+    }
+  }
   if (path === '/school/subjects') return json(200, d.subjects);
+
+  // ── канікули (етап 2): дві дати або обидві null ──
+  if (path === '/timetable/holidays' && method === 'GET') return json(200, holidays);
+  if (path === '/timetable/holidays' && method === 'PUT') {
+    const { holiday_from: f, holiday_to: t } = body as typeof holidays;
+    if (!f !== !t) return problem(422, 'holidays_pair', 'Вкажіть обидві дати або жодної');
+    if (f && t && f > t) return problem(422, 'holidays_order', 'Дата «з» пізніша за «по»');
+    Object.assign(holidays, { holiday_from: f, holiday_to: t });
+    audit(f ? 'Задано канікули' : 'Прибрано канікули', null, f ? { з: f, по: t } : {});
+    return json(200, holidays);
+  }
   if (path === '/school/teachers') return json(200, d.teachers);
   if (path === '/school/curriculum') return json(200, d.curriculum(current));
   if (path === '/school/audit') {

@@ -43,10 +43,17 @@ export function Row({ children }: { children: ReactNode }) {
 }
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'default' | 'primary' | 'danger';
+  variant?: 'default' | 'primary' | 'danger' | 'ghost';
+  size?: 'md' | 'sm';
 };
 
-export function Button({ variant = 'default', className, type = 'button', ...rest }: ButtonProps) {
+export function Button({
+  variant = 'default',
+  size = 'md',
+  className,
+  type = 'button',
+  ...rest
+}: ButtonProps) {
   return (
     <button
       type={type}
@@ -54,11 +61,23 @@ export function Button({ variant = 'default', className, type = 'button', ...res
         s.btn,
         variant === 'primary' && s.primary,
         variant === 'danger' && s.danger,
+        variant === 'ghost' && s.ghost,
+        size === 'sm' && s.small,
         className,
       )}
       {...rest}
     />
   );
+}
+
+/** Кнопки дій у рядку таблиці. */
+export function RowActions({ children }: { children: ReactNode }) {
+  return <div className={s.acts}>{children}</div>;
+}
+
+/** Кнопки над таблицею вкладки (праворуч), як у прототипі. */
+export function Toolbar({ children }: { children: ReactNode }) {
+  return <div className={s.toolbar}>{children}</div>;
 }
 
 export function Field({
@@ -171,3 +190,5 @@ export function ProblemNotice({ error }: { error: unknown }) {
     </Notice>
   );
 }
+
+export { Modal, ModalActions } from './Modal';

@@ -1,11 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
-import { Link, Outlet } from 'react-router';
+import { Outlet } from 'react-router';
 import { schoolApi, timetableApi } from '@/api/endpoints';
-import type { AccessToken, EducationArea, SchoolProfile, TokenScope } from '@/api/types';
+import type { AccessToken, SchoolProfile } from '@/api/types';
 import { DAY_SHORT } from '@/lib/time';
 import {
-  Badge,
   Button,
   Card,
   Field,
@@ -13,11 +12,18 @@ import {
   PageHeader,
   ProblemNotice,
   Spinner,
+  RowActions,
   Stack,
   TabLinks,
+  Toolbar,
 } from '@/ui';
-import { IconQr, IconRefresh } from '@/ui/icons';
+import { IconQr } from '@/ui/icons';
+import { QrDialog } from './QrDialog';
 import s from './DataPages.module.css';
+
+export { CalendarTab } from './CalendarTab';
+export { ClassesTab } from './ClassesTab';
+export { SubjectsTab } from './SubjectsTab';
 
 /** «Дані закладу»: вкладки як у прототипі, дані — school-service (розділ 09). */
 export function DataLayout() {
@@ -153,219 +159,78 @@ export function SchoolTab() {
   );
 }
 
-// ───────────── Календар (етап 2) ─────────────
-
-export function CalendarTab() {
-  return (
-    <Card>
-      <p>
-        <Badge>етап 2</Badge> Канікули — дві дати: <code>GET/PUT /holidays</code>.
-      </p>
-      <p className="muted">
-        Навчальні дні — пн–пт, субота вмикається у вкладці «Заклад». Окремих неробочих дат і
-        перенесень у MVP немає. На сторінці за QR канікули показуються фіксованим текстом «Канікули
-        з … по …».
-      </p>
-    </Card>
-  );
-}
-
-// ───────────── Класи й вчителі + їхні QR ─────────────
-
-function useTokens(scope: TokenScope) {
-  return useQuery({
-    queryKey: ['access-tokens', scope],
-    queryFn: () => timetableApi.accessTokens(scope),
-    gcTime: 0, // посилання з токенами не тримаємо в кеші довше, ніж відкрита сторінка
-  });
-}
-
-function QrCell({ token, scope }: { token: AccessToken | undefined; scope: TokenScope }) {
-  const qc = useQueryClient();
-  const rotate = useMutation({
-    mutationFn: (t: AccessToken) => timetableApi.rotateToken(t.token_id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['access-tokens', scope] }),
-  });
-  if (!token) return <span className="muted">—</span>;
-  return (
-    <span className="row" style={{ gap: 6 }}>
-      <span className="muted mono">покоління {token.generation}</span>
-      <Button
-        disabled={rotate.isPending}
-        title="Старий код одразу перестане працювати"
-        onClick={() => {
-          if (
-            window.confirm(
-              `Перевипустити QR для «${token.target_label}»? Старий код одразу перестане працювати, роздрукований аркуш доведеться замінити.`,
-            )
-          )
-            rotate.mutate(token);
-        }}
-      >
-        <IconRefresh width={14} height={14} />
-        Перевипустити
-      </Button>
-    </span>
-  );
-}
-
-function PrintLink({ scope, children }: { scope: TokenScope; children: string }) {
-  return (
-    <Link to={`/scheduler/print/qr/${scope}`} target="_blank" rel="noopener" className={s.print}>
-      <IconQr width={16} height={16} />
-      {children}
-    </Link>
-  );
-}
-
-export function ClassesTab() {
-  const classes = useQuery({ queryKey: ['classes'], queryFn: schoolApi.listClasses });
-  const tokens = useTokens('class');
-
-  if (classes.isPending) return <Spinner />;
-  if (classes.error) return <ProblemNotice error={classes.error} />;
-
-  return (
-    <Card>
-      <div className={s.cardHead}>
-        <h3>Класи</h3>
-        <PrintLink scope="class">Друк QR усіх класів</PrintLink>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Клас</th>
-            <th>Учнів</th>
-            <th>Пріоритет очного</th>
-            <th>QR класу</th>
-          </tr>
-        </thead>
-        <tbody>
-          {classes.data
-            .filter((c) => !c.archived_at)
-            .map((c) => (
-              <tr key={c.class_id}>
-                <td>
-                  <b>{c.name}</b>
-                </td>
-                <td>{c.students}</td>
-                <td>{c.in_person_priority ? <Badge tone="in">так</Badge> : '—'}</td>
-                <td>
-                  <QrCell
-                    scope="class"
-                    token={tokens.data?.find((t) => t.target_id === c.class_id)}
-                  />
-                </td>
-              </tr>
-            ))}
-        </tbody>
-      </table>
-    </Card>
-  );
-}
+// ───────────── Вчителі ─────────────
 
 export function TeachersTab() {
   const teachers = useQuery({ queryKey: ['teachers'], queryFn: schoolApi.listTeachers });
-  const tokens = useTokens('teacher');
+  const tokens = useQuery({
+    queryKey: ['access-tokens', 'teacher'],
+    queryFn: () => timetableApi.accessTokens('teacher'),
+    gcTime: 0, // посилання з токенами не тримаємо в кеші довше, ніж відкрита сторінка
+  });
+  const [qr, setQr] = useState<AccessToken | null>(null);
 
   if (teachers.isPending) return <Spinner />;
   if (teachers.error) return <ProblemNotice error={teachers.error} />;
+  const tokenOf = (id: string) => tokens.data?.find((t) => t.target_id === id) ?? null;
 
   return (
-    <Card>
-      <div className={s.cardHead}>
-        <h3>Вчителі</h3>
-        <PrintLink scope="teacher">Друк QR і повідомлень про ПД</PrintLink>
-      </div>
-      <p className="muted">
-        Система зберігає лише підпис, тижневий ліміт і недоступні дні. Повного імені, телефону й
-        пошти немає. Учні й батьки підписів вчителів не бачать.
-      </p>
-      <table>
-        <thead>
-          <tr>
-            <th>Підпис</th>
-            <th>Ліміт, год/тиж</th>
-            <th>Недоступні дні</th>
-            <th>QR вчителя</th>
-          </tr>
-        </thead>
-        <tbody>
-          {teachers.data.map((t) => (
-            <tr key={t.teacher_id}>
-              <td>
-                <b>{t.label}</b> <span className="muted">#{t.teacher_no}</span>
-              </td>
-              <td>{t.weekly_hours_limit}</td>
-              <td>
-                {t.unavailable_days.length
-                  ? t.unavailable_days.map((d) => DAY_SHORT[d]).join(', ')
-                  : '—'}
-              </td>
-              <td>
-                <QrCell
-                  scope="teacher"
-                  token={tokens.data?.find((x) => x.target_id === t.teacher_id)}
-                />
-              </td>
+    <>
+      <Toolbar>
+        <Button
+          size="sm"
+          onClick={() => window.open('/scheduler/print/qr/teacher', '_blank', 'noopener')}
+        >
+          <IconQr width={14} height={14} />
+          QR і повідомлення про ПД для всіх
+        </Button>
+      </Toolbar>
+      <Card>
+        <p className="muted">
+          Система зберігає лише підпис, тижневий ліміт і недоступні дні. Повного імені, телефону й
+          пошти немає. Учні й батьки підписів вчителів не бачать.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Підпис</th>
+              <th>Ліміт, год/тиж</th>
+              <th>Недоступні дні</th>
+              <th />
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </Card>
-  );
-}
-
-// ───────────── Предмети ─────────────
-
-/** 9 освітніх галузей; чотири з них — пріоритетні для очного навчання (рекомендація МОН). */
-const AREA_LABEL: Record<EducationArea, string> = {
-  math: 'Математична',
-  science: 'Природнича',
-  language_literature: 'Мовно-літературна',
-  civic_history: 'Громадянська та історична',
-  informatics: 'Інформатична',
-  arts: 'Мистецька',
-  technology: 'Технологічна',
-  social_health: 'Соціальна та здоров’язбережувальна',
-  physical: 'Фізкультурна',
-};
-const PRIORITY_AREAS: EducationArea[] = ['math', 'science', 'language_literature', 'civic_history'];
-
-export function SubjectsTab() {
-  const subjects = useQuery({ queryKey: ['subjects'], queryFn: schoolApi.listSubjects });
-  if (subjects.isPending) return <Spinner />;
-  if (subjects.error) return <ProblemNotice error={subjects.error} />;
-
-  return (
-    <Card>
-      <h3>Предмети</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Предмет</th>
-            <th>Скорочення</th>
-            <th>Освітня галузь</th>
-            <th>В укритті (розклад тривог)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {subjects.data
-            .filter((x) => !x.archived_at)
-            .map((x) => (
-              <tr key={x.subject_id}>
-                <td>{x.name}</td>
-                <td className="mono">{x.short_name}</td>
+          </thead>
+          <tbody>
+            {teachers.data.map((t) => (
+              <tr key={t.teacher_id}>
                 <td>
-                  {AREA_LABEL[x.education_area]}{' '}
-                  {PRIORITY_AREAS.includes(x.education_area) && <Badge tone="in">пріоритет</Badge>}
+                  <b>{t.label}</b> <span className="muted">#{t.teacher_no}</span>
                 </td>
-                <td>{x.not_in_shelter ? <Badge tone="out">не проводиться</Badge> : 'можна'}</td>
+                <td>{t.weekly_hours_limit}</td>
+                <td>
+                  {t.unavailable_days.length
+                    ? t.unavailable_days.map((d) => DAY_SHORT[d]).join(', ')
+                    : '—'}
+                </td>
+                <td>
+                  <RowActions>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={!tokenOf(t.teacher_id)}
+                      onClick={() => setQr(tokenOf(t.teacher_id))}
+                    >
+                      <IconQr width={15} height={15} />
+                      QR
+                    </Button>
+                  </RowActions>
+                </td>
               </tr>
             ))}
-        </tbody>
-      </table>
-    </Card>
+          </tbody>
+        </table>
+      </Card>
+      <QrDialog token={qr} onClose={() => setQr(null)} />
+    </>
   );
 }
 

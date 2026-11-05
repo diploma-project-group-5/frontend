@@ -97,3 +97,20 @@ export const IconWarn = base(
 );
 
 export const IconOk = base('0 0 16 16', <path d="m3 8.5 3 3 7-7" />, 2);
+
+export const IconPlus = base('0 0 16 16', <path d="M8 3v10M3 8h10" />, 1.8);
+
+export const IconEdit = base('0 0 16 16', <path d="M10.5 2.5 13.5 5.5 6 13H3v-3z" />);
+
+export const IconTrash = base(
+  '0 0 16 16',
+  <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" />,
+);
+
+export const IconCopy = base(
+  '0 0 16 16',
+  <>
+    <rect x="5" y="5" width="9" height="9" rx="1.5" />
+    <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" />
+  </>,
+);

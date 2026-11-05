@@ -100,6 +100,8 @@ export interface SchoolClass {
   archived_at: IsoDateTime | null;
 }
 
+export type ClassInput = Pick<SchoolClass, 'name' | 'students' | 'in_person_priority'>;
+
 export type EducationArea =
   | 'math'
   | 'science'
@@ -119,6 +121,11 @@ export interface Subject {
   not_in_shelter: boolean;
   archived_at: IsoDateTime | null;
 }
+
+export type SubjectInput = Pick<
+  Subject,
+  'name' | 'short_name' | 'education_area' | 'not_in_shelter'
+>;
 
 export interface Teacher {
   teacher_id: Uuid;
@@ -279,6 +286,14 @@ export interface AlertHours {
   recommendation: boolean;
   threshold_minutes: number;
   threshold_days: number;
+}
+
+// ───────────── канікули (етап 2) ─────────────
+
+/** «Стан закладу» в timetable: дві дати або обидві null; вільного тексту немає (розділ 10). */
+export interface Holidays {
+  holiday_from: IsoDate | null;
+  holiday_to: IsoDate | null;
 }
 
 // ───────────── QR ─────────────

@@ -219,3 +219,56 @@
   color: var(--text);
   box-shadow: var(--sh);
 }
+
+/* ── модальне вікно ── */
+.modal {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--sh2);
+  padding: 22px;
+  width: min(480px, calc(100vw - 32px));
+  color: var(--text);
+  background: var(--surface);
+}
+.modal::backdrop {
+  background: rgb(15 23 42 / 0.35);
+}
+.modal h2 {
+  margin: 0 0 12px;
+}
+.modalActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* ── «примарні» кнопки дій у рядку таблиці (прототип: btn ghost sm) ── */
+.ghost {
+  background: none;
+  border-color: transparent;
+  padding: 5px 8px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.ghost:hover:not(:disabled) {
+  color: var(--text);
+}
+.small {
+  padding: 6px 12px;
+  font-size: 0.9rem;
+}
+.acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
