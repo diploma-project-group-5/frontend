@@ -1,9 +1,13 @@
-import { createBrowserRouter, type RouteObject } from 'react-router';
+import type { ComponentType } from 'react';
+import { createBrowserRouter, Navigate, type RouteObject } from 'react-router';
 import { NotFoundPage, RouteErrorPage } from '@/pages/ErrorPages';
 
 /**
  * Усі сторінки — ліниві чанки. Важливо: keycloak-js імпортує лише модуль auth,
  * тож сторінки за QR (/c, /t) не завантажують ні його, ні код кабінету.
+ *
+ * Розділи кабінету укладача — як у прототипі (Дані закладу, Розклад, Погодження,
+ * Заміни, Сценарії, Журнал); вміст — за API специфікації v24.
  */
 const auth = () => import('@/auth/AuthGate');
 
@@ -16,6 +20,13 @@ const layout = async () => ({
   Component: (await import('@/layouts/CabinetLayout')).CabinetLayout,
 });
 
+/** Лінивий маршрут з іменованого експорту модуля. */
+function page<M>(load: () => Promise<M>, pick: (m: M) => ComponentType) {
+  return async () => ({ Component: pick(await load()) });
+}
+
+const data = () => import('@/pages/scheduler/data/DataPages');
+
 export const routes: RouteObject[] = [
   {
     errorElement: <RouteErrorPage />,
@@ -23,15 +34,17 @@ export const routes: RouteObject[] = [
       // ── Публічні сторінки за QR: без акаунта, токен у фрагменті URL ──
       {
         path: '/c',
-        lazy: async () => ({
-          Component: (await import('@/pages/public/PublicTimetablePage')).ClassTimetablePage,
-        }),
+        lazy: page(
+          () => import('@/pages/public/PublicTimetablePage'),
+          (m) => m.ClassTimetablePage,
+        ),
       },
       {
         path: '/t',
-        lazy: async () => ({
-          Component: (await import('@/pages/public/PublicTimetablePage')).TeacherTimetablePage,
-        }),
+        lazy: page(
+          () => import('@/pages/public/PublicTimetablePage'),
+          (m) => m.TeacherTimetablePage,
+        ),
       },
 
       // ── Кабінети ──
@@ -49,9 +62,10 @@ export const routes: RouteObject[] = [
                 children: [
                   {
                     path: 'schools',
-                    lazy: async () => ({
-                      Component: (await import('@/pages/admin/SchoolsPage')).SchoolsPage,
-                    }),
+                    lazy: page(
+                      () => import('@/pages/admin/SchoolsPage'),
+                      (m) => m.SchoolsPage,
+                    ),
                   },
                 ],
               },
@@ -65,53 +79,72 @@ export const routes: RouteObject[] = [
               {
                 lazy: layout,
                 children: [
+                  // Дані закладу — вкладки як у прототипі
+                  {
+                    path: 'data',
+                    lazy: page(data, (m) => m.DataLayout),
+                    children: [
+                      { index: true, element: <Navigate to="school" replace /> },
+                      { path: 'school', lazy: page(data, (m) => m.SchoolTab) },
+                      { path: 'calendar', lazy: page(data, (m) => m.CalendarTab) },
+                      { path: 'classes', lazy: page(data, (m) => m.ClassesTab) },
+                      { path: 'teachers', lazy: page(data, (m) => m.TeachersTab) },
+                      { path: 'subjects', lazy: page(data, (m) => m.SubjectsTab) },
+                      { path: 'curriculum', lazy: page(data, (m) => m.CurriculumTab) },
+                    ],
+                  },
+                  // Розклад
                   {
                     path: 'timetables',
-                    lazy: async () => ({
-                      Component: (await import('@/pages/scheduler/TimetablesPage')).TimetablesPage,
-                    }),
+                    lazy: page(
+                      () => import('@/pages/scheduler/TimetablesPage'),
+                      (m) => m.TimetablesPage,
+                    ),
                   },
                   {
                     path: 'timetables/:id',
-                    lazy: async () => ({
-                      Component: (await import('@/pages/scheduler/TimetablePage')).TimetablePage,
-                    }),
+                    lazy: page(
+                      () => import('@/pages/scheduler/TimetablePage'),
+                      (m) => m.TimetablePage,
+                    ),
                   },
                   {
-                    path: 'qr',
-                    lazy: async () => ({
-                      Component: (await import('@/pages/scheduler/QrPage')).QrPage,
-                    }),
+                    path: 'approval',
+                    lazy: page(
+                      () => import('@/pages/scheduler/ApprovalPage'),
+                      (m) => m.ApprovalPage,
+                    ),
                   },
-                  // Розділи, які ще не реалізовано: заглушка з посиланням на специфікацію.
-                  ...(
-                    [
-                      ['school', 'Профіль закладу', 'GET/PUT /school'],
-                      ['bells', 'Дзвінки', 'GET/PUT /bells'],
-                      ['classes', 'Класи', 'GET/POST /classes, PUT/DEL /classes/{id}'],
-                      ['subjects', 'Предмети', 'GET/POST /subjects, PUT/DEL /subjects/{id}'],
-                      ['teachers', 'Вчителі', 'GET/POST /teachers, PUT /teachers/{id}'],
-                      ['curriculum', 'Навчальний план', 'GET/PUT /curriculum'],
-                      ['alert-plan', 'Розклад тривог', '/alert-plan, /alert-hours'],
-                      ['audit', 'Журнал дій', 'GET /audit?from=&to=&target='],
-                    ] as const
-                  ).map(([path, title, endpoints]) => ({
-                    path,
-                    lazy: async () => {
-                      const { PlaceholderPage } = await import('@/pages/scheduler/PlaceholderPage');
-                      return {
-                        Component: () => <PlaceholderPage title={title} endpoints={endpoints} />,
-                      };
-                    },
-                  })),
+                  {
+                    path: 'substitutions',
+                    lazy: page(
+                      () => import('@/pages/scheduler/SubstitutionsPage'),
+                      (m) => m.SubstitutionsPage,
+                    ),
+                  },
+                  {
+                    path: 'scenarios',
+                    lazy: page(
+                      () => import('@/pages/scheduler/ScenariosPage'),
+                      (m) => m.ScenariosPage,
+                    ),
+                  },
+                  {
+                    path: 'journal',
+                    lazy: page(
+                      () => import('@/pages/scheduler/JournalPage'),
+                      (m) => m.JournalPage,
+                    ),
+                  },
                 ],
               },
               {
                 // Аркуші для друку — без меню кабінету, print-CSS
                 path: 'print/qr/:scope',
-                lazy: async () => ({
-                  Component: (await import('@/pages/print/QrSheetPage')).QrSheetPage,
-                }),
+                lazy: page(
+                  () => import('@/pages/print/QrSheetPage'),
+                  (m) => m.QrSheetPage,
+                ),
               },
             ],
           },

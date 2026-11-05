@@ -1,11 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import { schoolApi, timetableApi } from '@/api/endpoints';
 import type { Day, TimetableDetail, TimetableLoad } from '@/api/types';
 import { DAY_SHORT, formatDate } from '@/lib/time';
 import { Badge, Card, FormatBadge, Notice, PageHeader, ProblemNotice, Spinner, Stack } from '@/ui';
-import { PublishForm } from './PublishForm';
 import s from './TimetablePage.module.css';
 
 export function TimetablePage() {
@@ -31,7 +30,12 @@ export function TimetablePage() {
               Опубліковано, діє з {v.effective_from ? formatDate(v.effective_from) : '—'}
             </Badge>
           ) : (
-            <Badge>Перевірена, не опублікована</Badge>
+            <>
+              <Badge>Перевірена, не опублікована</Badge>
+              {v.kind === 'main' && (
+                <Link to={`/scheduler/approval?version=${v.timetable_id}`}>До погодження →</Link>
+              )}
+            </>
           )
         }
       />
@@ -50,13 +54,6 @@ export function TimetablePage() {
             reasons={load.data?.class_days}
           />
         </Card>
-
-        {v.kind === 'main' && v.state === 'validated' && (
-          <Card>
-            <h2>Публікація</h2>
-            <PublishForm timetableId={v.timetable_id} />
-          </Card>
-        )}
       </Stack>
     </>
   );

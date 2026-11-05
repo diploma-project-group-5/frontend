@@ -1,6 +1,7 @@
 import type {
   AccessToken,
   ClassDayFormat,
+  CurriculumRow,
   Day,
   Lesson,
   SchoolListItem,
@@ -89,6 +90,37 @@ export const teachers: Teacher[] = [
 
 export const DAYS: Day[] = [1, 2, 3, 4, 5];
 
+/** Навантаження дня за формулою 1.1: учні очних класів + персонал + вчителі з очними уроками. */
+function dayLoad(day: Day, lessons: Lesson[], formats: ClassDayFormat[]) {
+  const inPerson = formats.filter((f) => f.day === day && f.format === 'in_person');
+  const students = inPerson.reduce(
+    (sum, f) => sum + classes.find((c) => c.class_id === f.class_id)!.students,
+    0,
+  );
+  const teachersInPerson = new Set(
+    lessons
+      .filter((l) => l.day === day && inPerson.some((f) => f.class_id === l.class_id))
+      .map((l) => l.teacher_id),
+  ).size;
+  return students + profile.non_teaching_staff! + teachersInPerson;
+}
+
+/** Як солвер: поки день не вміщається в ліміт, переводимо на дистанційне спершу класи без пріоритету. */
+function fitCapacity(lessons: Lesson[], formats: ClassDayFormat[]) {
+  const limit = profile.shelter_capacity!;
+  for (const day of DAYS) {
+    const order = [...classes].sort(
+      (a, b) =>
+        Number(a.in_person_priority) - Number(b.in_person_priority) || a.students - b.students,
+    );
+    for (const c of order) {
+      if (dayLoad(day, lessons, formats) <= limit) break;
+      const f = formats.find((x) => x.class_id === c.class_id && x.day === day)!;
+      f.format = 'remote';
+    }
+  }
+}
+
 /** Детермінована «побудова»: зсув предметів по класах і днях; seed змінює розклад. */
 export function makeTimetable(id: string, seed: number): TimetableDetail {
   const lessons: Lesson[] = [];
@@ -111,6 +143,7 @@ export function makeTimetable(id: string, seed: number): TimetableDetail {
       }
     }
   });
+  fitCapacity(lessons, day_formats);
   return {
     timetable_id: id,
     kind: 'main',
@@ -131,22 +164,10 @@ export function makeTimetable(id: string, seed: number): TimetableDetail {
 /** Формула 1.1: учні очних класів + персонал + вчителі з очними уроками ≤ паспортна місткість. */
 export function makeLoad(tt: TimetableDetail): TimetableLoad {
   const limit = profile.shelter_capacity!;
-  const days = DAYS.map((day) => {
-    const inPerson = tt.day_formats.filter((f) => f.day === day && f.format === 'in_person');
-    const students = inPerson.reduce(
-      (sum, f) => sum + classes.find((c) => c.class_id === f.class_id)!.students,
-      0,
-    );
-    const teachersInPerson = new Set(
-      tt.lessons
-        .filter((l) => l.day === day && inPerson.some((f) => f.class_id === l.class_id))
-        .map((l) => l.teacher_id),
-    ).size;
-    return {
-      day,
-      passport: { load: students + profile.non_teaching_staff! + teachersInPerson, limit },
-    };
-  });
+  const days = DAYS.map((day) => ({
+    day,
+    passport: { load: dayLoad(day, tt.lessons, tt.day_formats), limit },
+  }));
   const peak = days.reduce((a, b) => (b.passport.load > a.passport.load ? b : a));
   return {
     model: '1.1',
@@ -228,4 +249,22 @@ export function tokens(): AccessToken[] {
 export function rotate(tokenId: string): AccessToken | undefined {
   generations.set(tokenId, (generations.get(tokenId) ?? 1) + 1);
   return tokens().find((t) => t.token_id === tokenId);
+}
+
+/** Навчальний план, що відповідає чинній версії: клас × предмет → вчитель, годин на тиждень. */
+export function curriculum(tt: TimetableDetail): CurriculumRow[] {
+  const rows = new Map<string, CurriculumRow>();
+  for (const l of tt.lessons) {
+    const key = `${l.class_id}|${l.subject_id}`;
+    const r = rows.get(key);
+    if (r) r.hours_per_week++;
+    else
+      rows.set(key, {
+        class_id: l.class_id,
+        subject_id: l.subject_id,
+        teacher_id: l.teacher_id,
+        hours_per_week: 1,
+      });
+  }
+  return [...rows.values()];
 }

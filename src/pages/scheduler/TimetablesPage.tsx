@@ -48,12 +48,13 @@ export function TimetablesPage() {
     if (job.data?.state === 'done') void qc.invalidateQueries({ queryKey: ['timetables'] });
   }, [job.data?.state, qc]);
 
-  const running = !!jobId && !isTerminal(job.data);
+  // Помилка опитування (напр. 404 на задачу з минулої сесії) — це не «побудова триває»
+  const running = !!jobId && !job.error && !isTerminal(job.data);
 
   return (
     <>
       <PageHeader
-        title="Версії розкладу"
+        title="Розклад"
         actions={
           <Button
             variant="primary"
@@ -83,7 +84,19 @@ export function TimetablesPage() {
 function JobStatus({ jobId, onDismiss }: { jobId: string; onDismiss: () => void }) {
   const job = useJob(jobId);
   if (job.isPending) return <Spinner label="Запускаємо побудову…" />;
-  if (job.error) return <ProblemNotice error={job.error} />;
+  if (job.error) {
+    if (isApiError(job.error) && job.error.status === 404) {
+      return (
+        <Notice tone="info">
+          <p>
+            Попередню задачу побудови більше не знайдено.{' '}
+            <button onClick={onDismiss}>Закрити</button>
+          </p>
+        </Notice>
+      );
+    }
+    return <ProblemNotice error={job.error} />;
+  }
 
   const j = job.data;
   if (!isTerminal(j)) {

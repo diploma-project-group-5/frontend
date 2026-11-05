@@ -1,6 +1,15 @@
 import { addDays, format, parseISO, startOfISOWeek } from 'date-fns';
 import { config } from '@/config';
-import type { Job, PublicDay, PublicTimetable, PublishRequest, TimetableDetail } from '@/api/types';
+import type {
+  AlertHours,
+  AlertPlan,
+  AuditEntry,
+  Job,
+  PublicDay,
+  PublicTimetable,
+  PublishRequest,
+  TimetableDetail,
+} from '@/api/types';
 import { formatDate, minEffectiveFrom, todayKyiv } from '@/lib/time';
 import * as d from './data';
 
@@ -16,7 +25,13 @@ import * as d from './data';
  */
 
 const versions = new Map<string, TimetableDetail>();
-const jobs = new Map<string, { createdAt: number; seed: number; timetableId?: string }>();
+type MockJob = {
+  createdAt: number;
+  seed: number;
+  kind: 'build_main' | 'build_alert';
+  timetableId?: string;
+};
+const jobs = new Map<string, MockJob>();
 let seq = 0;
 
 // чинна версія з минулою датою, як у сіді демо
@@ -26,6 +41,101 @@ current.effective_from = '2026-09-01';
 current.published_at = '2026-08-25T10:00:00Z';
 current.created_at = '2026-08-20T10:00:00Z';
 versions.set(current.timetable_id, current);
+
+// погоджений розклад тривог із сіду (шаблон kind='alert', модель 1.2)
+function makeAlertTemplate(seed: number) {
+  const tt = d.makeTimetable(crypto.randomUUID(), seed + 2);
+  tt.kind = 'alert';
+  tt.model = '1.2';
+  versions.set(tt.timetable_id, tt);
+  return tt.timetable_id;
+}
+
+const alertPlan: AlertPlan = {
+  timetable_id: makeAlertTemplate(0),
+  state: 'approved',
+  // скорочені уроки по 35 хв
+  bells: [
+    ['08:30', '09:05'],
+    ['09:15', '09:50'],
+    ['10:05', '10:40'],
+    ['10:55', '11:30'],
+    ['11:40', '12:15'],
+    ['12:25', '13:00'],
+  ].map(([start, end], i) => ({ lesson_no: i + 1, start: start!, end: end! })),
+  order: { order_no: '112-о', order_date: '2026-09-28', approved_by: 'Савченко Л. М., директор' },
+  activations: [],
+};
+
+const alertLocked = () => alertPlan.activations.some((a) => !a.to || a.to > todayKyiv());
+
+// облік тривог: вигадані хвилини за останні дні, остання серія — понад поріг
+const THRESHOLD_MIN = 120;
+const THRESHOLD_DAYS = 3;
+const alertMinutes = new Map<string, number>();
+for (let i = 13; i >= 0; i--) {
+  const date = addDaysIsoLocal(todayKyiv(), -i);
+  alertMinutes.set(date, i <= 2 ? 150 + i * 20 : [0, 45, 90, 30, 0, 160, 20][i % 7]!);
+}
+
+function addDaysIsoLocal(date: string, n: number) {
+  return format(addDays(parseISO(date), n), 'yyyy-MM-dd');
+}
+
+function alertHoursView(from: string, to: string): AlertHours {
+  const days: AlertHours['days'] = [];
+  for (let dt = from; dt <= to; dt = addDaysIsoLocal(dt, 1)) {
+    days.push({ date: dt, minutes: alertMinutes.get(dt) ?? 0 });
+  }
+  let streak = 0;
+  for (let i = days.length - 1; i >= 0 && days[i]!.minutes > THRESHOLD_MIN; i--) streak++;
+  return {
+    days,
+    current_streak_days: streak,
+    recommendation: streak >= THRESHOLD_DAYS,
+    threshold_minutes: THRESHOLD_MIN,
+    threshold_days: THRESHOLD_DAYS,
+  };
+}
+
+// журнал дій (без прізвищ — «Вчитель #N»)
+const auditLog: AuditEntry[] = [
+  ['2026-08-25T10:00:00Z', 'Опубліковано розклад', null, { наказ: '97-о', 'діє з': '01.09' }],
+  ['2026-09-28T12:10:00Z', 'Погоджено розклад тривог', null, { наказ: '112-о' }],
+  ['2026-10-20T08:40:00Z', 'Змінено дані вчителя', 'Вчитель #5', { поле: 'ліміт годин' }],
+  [
+    '2026-10-27T09:05:00Z',
+    'Перевипущено QR-код',
+    'Вчитель #7',
+    { примітка: 'старий код недійсний' },
+  ],
+].map(([at, action, target, details], i) => ({
+  entry_id: `a${i + 1}`,
+  at: at as string,
+  actor: 'Укладач розкладу',
+  action: action as string,
+  target: target as string | null,
+  details: details as Record<string, unknown>,
+}));
+
+function audit(action: string, target: string | null, details: Record<string, unknown> = {}) {
+  auditLog.unshift({
+    entry_id: crypto.randomUUID(),
+    at: new Date().toISOString(),
+    actor: 'Укладач розкладу',
+    action,
+    target,
+    details,
+  });
+}
+
+function activeBuild(kind?: MockJob['kind']) {
+  return [...jobs.keys()].find((id) => {
+    const j = jobs.get(id)!;
+    const s = jobView(id)?.state;
+    return (!kind || j.kind === kind) && (s === 'queued' || s === 'running');
+  });
+}
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), {
@@ -46,13 +156,24 @@ function jobView(id: string): Job | undefined {
   const age = Date.now() - j.createdAt;
   const base = {
     job_id: id,
-    kind: 'build_main' as const,
+    kind: j.kind,
     snapshot_version: d.profile.snapshot_version,
     created_at: new Date(j.createdAt).toISOString(),
     started_at: age > 1200 ? new Date(j.createdAt + 1200).toISOString() : null,
   };
   if (age < 1200) return { ...base, state: 'queued' };
   if (age < 4000) return { ...base, state: 'running' };
+  if (j.kind === 'build_alert') {
+    if (!j.timetableId) {
+      // результат build_alert заміняє шаблон тривог і повертає план у draft
+      if (alertPlan.timetable_id) versions.delete(alertPlan.timetable_id);
+      j.timetableId = makeAlertTemplate(j.seed);
+      alertPlan.timetable_id = j.timetableId;
+      alertPlan.state = 'draft';
+      alertPlan.order = null;
+    }
+    return { ...base, state: 'done', result: { alert_plan: true } };
+  }
   if (!j.timetableId) {
     const tt = d.makeTimetable(crypto.randomUUID(), j.seed);
     versions.set(tt.timetable_id, tt);
@@ -128,21 +249,88 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
   }
 
   // ── school ──
+  if (path === '/school/school' && method === 'PUT') {
+    Object.assign(d.profile, body, { name: d.profile.name });
+    d.profile.snapshot_version++;
+    for (const v of versions.values())
+      if (v.state === 'validated') v.data_changed_since_build = true;
+    audit('Змінено профіль закладу', null, body);
+    return json(200, d.profile);
+  }
   if (path === '/school/school') return json(200, d.profile);
   if (path === '/school/bells') return json(200, d.bells);
   if (path === '/school/classes') return json(200, d.classes);
   if (path === '/school/subjects') return json(200, d.subjects);
   if (path === '/school/teachers') return json(200, d.teachers);
+  if (path === '/school/curriculum') return json(200, d.curriculum(current));
+  if (path === '/school/audit') {
+    const from = url.searchParams.get('from') ?? '';
+    const to = url.searchParams.get('to') ?? '9999';
+    return json(
+      200,
+      auditLog
+        .filter((e) => e.at.slice(0, 10) >= from && e.at.slice(0, 10) <= to)
+        .sort((x, y) => y.at.localeCompare(x.at)),
+    );
+  }
+
+  // ── розклад тривог ──
+  if (path === '/timetable/alert-plan' && method === 'GET') return json(200, alertPlan);
+  if (path === '/timetable/alert-plan:build' && method === 'POST') {
+    if (alertLocked()) return problem(409, 'alert_plan_active', 'Діє активація розкладу тривог');
+    const busy = activeBuild();
+    if (busy) return problem(409, 'build_in_progress', 'Побудова вже йде', { job_id: busy });
+    const id = crypto.randomUUID();
+    jobs.set(id, { createdAt: Date.now(), seed: ++seq, kind: 'build_alert' });
+    return json(202, { job_id: id });
+  }
+  if (path === '/timetable/alert-plan:approve' && method === 'POST') {
+    if (activeBuild('build_alert')) return problem(409, 'build_in_progress', 'Побудова вже йде');
+    alertPlan.state = 'approved';
+    alertPlan.order = body;
+    audit('Погоджено розклад тривог', null, { наказ: body.order_no });
+    return json(200, alertPlan);
+  }
+  if (path === '/timetable/alert-plan:activate' && method === 'POST') {
+    if (alertPlan.state !== 'approved') return problem(409, 'not_approved', 'План не погоджено');
+    if (body.from < todayKyiv()) return problem(422, 'invalid_date', 'Дата раніше сьогодні');
+    const overlaps = alertPlan.activations.some((a) => !a.to || a.to > body.from);
+    if (overlaps) return problem(409, 'overlap', 'Перетин з іншою активацією');
+    alertPlan.activations.push({ activation_id: crypto.randomUUID(), from: body.from, to: null });
+    audit('Активовано розклад тривог', null, { з: body.from });
+    return json(200, { warnings: { lost_substitutions: [] } });
+  }
+  if ((m = path.match(/^\/timetable\/alert-plan\/activations\/([^/:]+):end$/))) {
+    const a = alertPlan.activations.find((x) => x.activation_id === m![1]);
+    if (!a) return notFound();
+    if (body.from <= a.from || body.from < todayKyiv()) {
+      return problem(
+        422,
+        'invalid_date',
+        'Дата повернення має бути пізніша за початок і не раніше сьогодні',
+      );
+    }
+    if (a.from > todayKyiv()) alertPlan.activations.splice(alertPlan.activations.indexOf(a), 1);
+    else a.to = body.from;
+    audit('Повернуто звичайний розклад', null, { з: body.from });
+    return json(200, { warnings: { lost_substitutions: [] } });
+  }
+  if (path === '/timetable/alert-hours' && method === 'GET') {
+    const from = url.searchParams.get('from')!;
+    const to = url.searchParams.get('to')!;
+    return json(200, alertHoursView(from, to));
+  }
+  if ((m = path.match(/^\/timetable\/alert-hours\/(\d{4}-\d{2}-\d{2})$/)) && method === 'PUT') {
+    alertMinutes.set(m[1]!, Number(body.minutes));
+    return json(200, { date: m[1], minutes: Number(body.minutes) });
+  }
 
   // ── timetable: задачі й версії ──
   if (path === '/timetable/timetables:build' && method === 'POST') {
-    const active = [...jobs.keys()].find((id) => {
-      const s = jobView(id)?.state;
-      return s === 'queued' || s === 'running';
-    });
+    const active = activeBuild();
     if (active) return problem(409, 'build_in_progress', 'Побудова вже йде', { job_id: active });
     const id = crypto.randomUUID();
-    jobs.set(id, { createdAt: Date.now(), seed: ++seq });
+    jobs.set(id, { createdAt: Date.now(), seed: ++seq, kind: 'build_main' });
     return json(202, { job_id: id });
   }
   if ((m = path.match(/^\/timetable\/jobs\/([^/]+)$/))) {
@@ -151,6 +339,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
   }
   if (path === '/timetable/timetables') {
     const list = [...versions.values()]
+      .filter((v) => v.kind === 'main')
       .map(d.summary)
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
     return json(200, list);
@@ -187,6 +376,10 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     tt.state = 'published';
     tt.effective_from = req.effective_from;
     tt.published_at = new Date().toISOString();
+    audit('Опубліковано розклад', null, {
+      наказ: req.order_no,
+      'діє з': formatDate(req.effective_from),
+    });
     return json(200, { timetable: d.summary(tt), warnings: { lost_substitutions: [] } });
   }
   if ((m = path.match(/^\/timetable\/timetables\/([^/:]+)\/load$/))) {
@@ -208,6 +401,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
   }
   if ((m = path.match(/^\/timetable\/access-tokens\/([^/:]+):rotate$/)) && method === 'POST') {
     const t = d.rotate(m[1]!);
+    if (t) audit('Перевипущено QR-код', t.target_label, { примітка: 'старий код недійсний' });
     return t ? json(200, t) : notFound();
   }
 

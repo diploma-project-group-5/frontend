@@ -1,0 +1,77 @@
+.cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.head h3 {
+  margin: 0;
+}
+
+.dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0 0 12px;
+}
+.dl dt {
+  color: var(--muted);
+}
+.dl dd {
+  margin: 0;
+}
+
+.activations {
+  margin: 0 0 12px;
+  padding-left: 18px;
+}
+
+.inline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.inline h4 {
+  margin: 0;
+}
+
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 110px;
+  margin: 12px 0 16px;
+}
+.barCol {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.bar,
+.barOver {
+  width: 100%;
+  max-width: 28px;
+  min-height: 2px;
+  border-radius: 4px 4px 0 0;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.barOver {
+  background: var(--warn);
+}

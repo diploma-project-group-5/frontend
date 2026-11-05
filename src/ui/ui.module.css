@@ -154,3 +154,68 @@
   color: var(--sub);
   border-color: currentColor;
 }
+
+/* ── чипи стану (прототип) ── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--surface2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.chip_ok {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+}
+.chip_warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+.chip_bad {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 13%, transparent);
+}
+.chip_acc {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.chip_in {
+  color: var(--in);
+  background: color-mix(in srgb, var(--in) 13%, transparent);
+}
+.chip_out {
+  color: var(--out);
+  background: color-mix(in srgb, var(--out) 13%, transparent);
+}
+
+/* ── вкладки-пігулки (прототип) ── */
+.tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px;
+  margin-bottom: 16px;
+}
+.tab {
+  padding: 6px 14px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-weight: 500;
+  text-decoration: none;
+}
+.tab:hover {
+  color: var(--text);
+}
+.tabActive {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--sh);
+}

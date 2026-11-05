@@ -1,10 +1,34 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { useId } from 'react';
+import { NavLink } from 'react-router';
 import { ApiError } from '@/api/http';
 import type { DayFormat } from '@/api/types';
 import s from './ui.module.css';
 
 const cx = (...c: (string | false | undefined)[]) => c.filter(Boolean).join(' ');
+
+export function Chip({
+  children,
+  tone,
+}: {
+  children: ReactNode;
+  tone?: 'ok' | 'warn' | 'bad' | 'acc' | 'in' | 'out';
+}) {
+  return <span className={cx(s.chip, tone && s[`chip_${tone}`])}>{children}</span>;
+}
+
+/** Вкладки-«пігулки» з прототипу; кожна вкладка — маршрут. */
+export function TabLinks({ tabs }: { tabs: [to: string, label: string][] }) {
+  return (
+    <nav className={s.tabs} aria-label="Вкладки">
+      {tabs.map(([to, label]) => (
+        <NavLink key={to} to={to} className={({ isActive }) => cx(s.tab, isActive && s.tabActive)}>
+          {label}
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
 
 export function Card({ children, className }: { children: ReactNode; className?: string }) {
   return <section className={cx(s.card, className)}>{children}</section>;
