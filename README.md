@@ -116,6 +116,9 @@ Keycloak у репозиторії `platform`.
 - Заклад береться з JWT — у шляхах його немає.
 - Токен QR — лише у фрагменті URL і заголовку `X-Access-Token`, ніколи в query чи логах.
 - На сторінках за QR не показуємо назву закладу, підписи вчителів на сторінці класу, місткість.
+- **Гілки** — як в інших репозиторіях організації: робоча гілка `develop` (за замовчуванням),
+  зміни — у гілках `feat/<№>-<опис>` через PR у `develop`; у `main` — релізи з `develop`.
+  CI перевіряє кожен PR і push у `develop`/`main`.
 
 ## Docker
 
@@ -123,5 +126,5 @@ Keycloak у репозиторії `platform`.
 docker build -t lad-web .
 ```
 
-Образ на `nginx-unprivileged`, порт `8080`, `/healthz`. На `main` CI публікує
-`ghcr.io/<org>/web:<sha>`; викатка — зміною тегу в репозиторії `platform`.
+Образ на `nginx-unprivileged`, порт `8080`, `/healthz`. Лише з `main` (не з `develop`) CI
+публікує `ghcr.io/<org>/web:<sha>`; викатка — зміною тегу в репозиторії `platform`.

@@ -3,7 +3,11 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -24,7 +28,8 @@ jobs:
       - run: npm test
       - run: npm run build
 
-  # Образ web для platform: тег = короткий sha коміту. Викатка — зміною тегу в репо platform.
+  # Образ web для platform — лише з main (реліз), не з develop: тег = короткий sha коміту.
+  # Викатка — зміною тегу в репо platform.
   image:
     needs: check
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
