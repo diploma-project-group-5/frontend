@@ -1,0 +1,113 @@
+/*
+ * Дизайн-токени перенесено з прототипу «Лад».
+ * Шрифт Onest вбудовано в збірку (@fontsource) — публічні сторінки не тягнуть сторонніх шрифтів (CSP 'self').
+ */
+@import '@fontsource-variable/onest/wght.css';
+
+:root {
+  --bg: #f2f4f8;
+  --surface: #ffffff;
+  --surface2: #f7f8fb;
+  --line: #e3e7ee;
+  --text: #0f172a;
+  --muted: #5b6678;
+  --accent: #2d5bd8;
+  --on-accent: #ffffff;
+
+  --ok: #2f8a3e;
+  --warn: #b45f06;
+  --bad: #d0342c;
+
+  /* формати дня: очно / дистанційно, позначка заміни */
+  --in: #0e7c70;
+  --out: #6b46d6;
+  --sub: #b45f06;
+
+  --r: 14px;
+  --r2: 10px;
+  --sh: 0 1px 2px rgb(15 23 42 / 0.05), 0 2px 8px rgb(15 23 42 / 0.05);
+  --sh2: 0 12px 32px rgb(15 23 42 / 0.14);
+
+  --f: 'Onest Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --m: ui-monospace, Menlo, Consolas, monospace;
+
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--f);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.25;
+  margin: 0 0 0.5em;
+}
+h1 {
+  font-size: 1.6rem;
+}
+h2 {
+  font-size: 1.25rem;
+}
+h3 {
+  font-size: 1.05rem;
+}
+
+a {
+  color: var(--accent);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+th,
+td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+code,
+.mono {
+  font-family: var(--m);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

@@ -1,0 +1,77 @@
+.page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.header h1 {
+  margin: 2px 0 0;
+}
+
+.week {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.week h2 {
+  margin: 12px 0 0;
+}
+
+.day {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 14px 16px;
+}
+.day h3 {
+  margin: 0;
+  text-transform: capitalize;
+}
+.dayHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.lessons {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.lessons li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+.lessons li:first-child {
+  border-top: none;
+}
+.no {
+  width: 22px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.time {
+  font-family: var(--m);
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.what {
+  flex: 1;
+  font-weight: 600;
+}
+
+.footer {
+  margin-top: 16px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: center;
+}

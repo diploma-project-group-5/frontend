@@ -1,0 +1,71 @@
+.sheet {
+  max-width: 210mm;
+  margin: 0 auto;
+  padding: 16px;
+  background: #fff;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.classGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8mm;
+}
+
+.card {
+  margin: 0;
+  border: 1px dashed #999;
+  border-radius: 6px;
+  padding: 6mm 4mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3mm;
+  break-inside: avoid;
+}
+.card figcaption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.card figcaption b {
+  font-size: 1.4rem;
+}
+.card figcaption span {
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.footnote {
+  grid-column: 1 / -1;
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.teacherPage {
+  break-after: page;
+  padding: 10mm 0;
+}
+.teacherPage h1 {
+  font-size: 1.6rem;
+}
+.teacherPage h2 {
+  font-size: 1.05rem;
+  margin-top: 8mm;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  .sheet {
+    padding: 0;
+    max-width: none;
+  }
+}

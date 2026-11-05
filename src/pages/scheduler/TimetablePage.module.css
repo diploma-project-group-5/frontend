@@ -1,0 +1,74 @@
+.load td,
+.load th {
+  white-space: nowrap;
+}
+
+.meter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bar {
+  width: 180px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.fill {
+  height: 100%;
+  background: var(--in);
+}
+.fillOver {
+  height: 100%;
+  background: var(--bad);
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 16px 0 0;
+}
+.summary dt {
+  color: var(--muted);
+}
+.summary dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.tab,
+.tabActive {
+  font: inherit;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.tabActive {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.gridWrap {
+  overflow-x: auto;
+}
+.grid th:first-child {
+  white-space: nowrap;
+}
+.grid td {
+  min-width: 90px;
+}
+.grid td b,
+.grid td small {
+  display: block;
+}
