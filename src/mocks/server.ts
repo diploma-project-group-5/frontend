@@ -216,8 +216,8 @@ function publicTimetable(scope: 'class' | 'teacher'): PublicTimetable {
         .sort((a, b) => a.lesson_no - b.lesson_no)
         .map((l) => ({
           lesson_no: l.lesson_no,
-          start: d.bells[l.lesson_no - 1]!.start,
-          end: d.bells[l.lesson_no - 1]!.end,
+          start: d.bells[l.lesson_no - 1]?.start ?? '',
+          end: d.bells[l.lesson_no - 1]?.end ?? '',
           ...(scope === 'class'
             ? { subject: d.subjects.find((s) => s.subject_id === l.subject_id)!.name }
             : { class_name: d.classes.find((c) => c.class_id === l.class_id)!.name }),
@@ -272,6 +272,17 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     return json(200, d.profile);
   }
   if (path === '/school/school') return json(200, d.profile);
+  if (path === '/school/bells' && method === 'PUT') {
+    const list = body as typeof d.bells;
+    const bad = list.some(
+      (b, i) =>
+        b.lesson_no !== i + 1 || !(b.start < b.end) || (i > 0 && b.start < list[i - 1]!.end),
+    );
+    if (bad) return problem(422, 'bells_invalid', 'Дзвінки перетинаються або йдуть не по черзі');
+    d.bells.splice(0, d.bells.length, ...list);
+    dataChanged('Змінено дзвінки', null, { уроків: list.length });
+    return json(200, d.bells);
+  }
   if (path === '/school/bells') return json(200, d.bells);
   if (path === '/school/classes' && method === 'POST') {
     const c = { class_id: `c${Date.now()}`, ...body, archived_at: null };

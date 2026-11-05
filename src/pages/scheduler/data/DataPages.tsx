@@ -14,6 +14,7 @@ import {
   Stack,
   TabLinks,
 } from '@/ui';
+import { BellsCard } from './BellsCard';
 import s from './DataPages.module.css';
 
 export { CalendarTab } from './CalendarTab';
@@ -58,7 +59,6 @@ const PROFILE_FIELDS: [keyof SchoolProfile, string, string?][] = [
 export function SchoolTab() {
   const qc = useQueryClient();
   const profile = useQuery({ queryKey: ['profile'], queryFn: schoolApi.getProfile });
-  const bells = useQuery({ queryKey: ['bells'], queryFn: schoolApi.getBells });
   const [draft, setDraft] = useState<Partial<SchoolProfile> | null>(null);
 
   const save = useMutation({
@@ -126,32 +126,7 @@ export function SchoolTab() {
         </form>
       </Card>
 
-      <Card>
-        <h3>Дзвінки</h3>
-        {bells.isPending && <Spinner />}
-        {bells.error && <ProblemNotice error={bells.error} />}
-        {bells.data && (
-          <table>
-            <thead>
-              <tr>
-                <th>Урок</th>
-                <th>Початок</th>
-                <th>Кінець</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bells.data.map((b) => (
-                <tr key={b.lesson_no}>
-                  <td>{b.lesson_no}</td>
-                  <td className="mono">{b.start}</td>
-                  <td className="mono">{b.end}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        <p className="muted">Дзвінки розкладу тривог задаються окремо — у «Сценаріях».</p>
-      </Card>
+      <BellsCard />
     </div>
   );
 }
