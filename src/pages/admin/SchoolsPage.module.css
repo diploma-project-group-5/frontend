@@ -1,0 +1,46 @@
+.summary {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: var(--r2);
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  color: var(--muted, inherit);
+  font-size: 0.9rem;
+}
+
+.bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.search {
+  min-width: min(280px, 100%);
+  font: inherit;
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+  padding: 7px 10px;
+  background: var(--surface);
+  color: inherit;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.form p {
+  margin: 0;
+}
+
+.err {
+  margin: 0;
+  color: var(--bad);
+  font-size: 0.9rem;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
