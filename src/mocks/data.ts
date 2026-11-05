@@ -1,0 +1,231 @@
+import type {
+  AccessToken,
+  ClassDayFormat,
+  Day,
+  Lesson,
+  SchoolListItem,
+  SchoolProfile,
+  Subject,
+  Teacher,
+  TimetableDetail,
+  TimetableLoad,
+  TimetableSummary,
+} from '@/api/types';
+
+/** Демо-заклад для мок-режиму (`npm run dev:mock`). Дані вигадані. */
+
+export const profile: SchoolProfile = {
+  name: 'Ліцей № 17',
+  lessons_per_day: 6,
+  saturday: false,
+  shelter_capacity: 160,
+  non_teaching_staff: 12,
+  shelter_seats: 130,
+  snapshot_version: 42,
+};
+
+export const bells = [
+  ['08:30', '09:15'],
+  ['09:25', '10:10'],
+  ['10:30', '11:15'],
+  ['11:35', '12:20'],
+  ['12:30', '13:15'],
+  ['13:25', '14:10'],
+].map(([start, end], i) => ({ lesson_no: i + 1, start: start!, end: end! }));
+
+export const classes = (
+  [
+    ['5-А', 28, true],
+    ['5-Б', 26, false],
+    ['6-А', 30, true],
+    ['6-Б', 25, false],
+    ['7-А', 29, false],
+    ['7-Б', 27, true],
+  ] as const
+).map(([name, students, prio], i) => ({
+  class_id: `c${i + 1}`,
+  name,
+  students,
+  in_person_priority: prio,
+  archived_at: null,
+}));
+
+export const subjects: Subject[] = (
+  [
+    ['Українська мова', 'Укр', 'language_literature'],
+    ['Математика', 'Мат', 'math'],
+    ['Англійська мова', 'Англ', 'language_literature'],
+    ['Історія', 'Іст', 'civic_history'],
+    ['Біологія', 'Біол', 'science'],
+    ['Інформатика', 'Інф', 'informatics'],
+    ['Мистецтво', 'Мист', 'arts'],
+    ['Фізкультура', 'Фізк', 'physical'],
+  ] as const
+).map(([name, short_name, area], i) => ({
+  subject_id: `s${i + 1}`,
+  name,
+  short_name,
+  education_area: area,
+  not_in_shelter: area === 'physical',
+  archived_at: null,
+}));
+
+export const teachers: Teacher[] = [
+  'Іваненко О. П.',
+  'Коваль Н. В.',
+  'Мельник І. С.',
+  'Шевченко Л. М.',
+  'Бондар Т. І.',
+  'Ткаченко Г. О.',
+  'Кравець А. Р.',
+  'Олійник В. Д.',
+].map((label, i) => ({
+  teacher_id: `t${i + 1}`,
+  teacher_no: i + 1,
+  label,
+  weekly_hours_limit: 24,
+  unavailable_days: [],
+}));
+
+export const DAYS: Day[] = [1, 2, 3, 4, 5];
+
+/** Детермінована «побудова»: зсув предметів по класах і днях; seed змінює розклад. */
+export function makeTimetable(id: string, seed: number): TimetableDetail {
+  const lessons: Lesson[] = [];
+  const day_formats: ClassDayFormat[] = [];
+  classes.forEach((c, ci) => {
+    for (const day of DAYS) {
+      // один дистанційний день на клас; пріоритетні класи частіше лишаються очно
+      const remoteDay = ((ci + seed) % 5) + 1;
+      const remote = day === remoteDay && !(c.in_person_priority && (ci + day) % 2 === 0);
+      day_formats.push({ class_id: c.class_id, day, format: remote ? 'remote' : 'in_person' });
+      for (let n = 1; n <= 6; n++) {
+        const si = (ci + day * 3 + n + seed) % subjects.length;
+        lessons.push({
+          class_id: c.class_id,
+          day,
+          lesson_no: n,
+          subject_id: subjects[si]!.subject_id,
+          teacher_id: teachers[si]!.teacher_id,
+        });
+      }
+    }
+  });
+  return {
+    timetable_id: id,
+    kind: 'main',
+    model: '1.1',
+    state: 'validated',
+    effective_from: null,
+    published_at: null,
+    data_changed_since_build: false,
+    created_at: new Date().toISOString(),
+    snapshot_version: profile.snapshot_version,
+    classes: classes.map(({ class_id, name }) => ({ class_id, name })),
+    teachers: teachers.map(({ teacher_id, label }) => ({ teacher_id, label })),
+    lessons,
+    day_formats,
+  };
+}
+
+/** Формула 1.1: учні очних класів + персонал + вчителі з очними уроками ≤ паспортна місткість. */
+export function makeLoad(tt: TimetableDetail): TimetableLoad {
+  const limit = profile.shelter_capacity!;
+  const days = DAYS.map((day) => {
+    const inPerson = tt.day_formats.filter((f) => f.day === day && f.format === 'in_person');
+    const students = inPerson.reduce(
+      (sum, f) => sum + classes.find((c) => c.class_id === f.class_id)!.students,
+      0,
+    );
+    const teachersInPerson = new Set(
+      tt.lessons
+        .filter((l) => l.day === day && inPerson.some((f) => f.class_id === l.class_id))
+        .map((l) => l.teacher_id),
+    ).size;
+    return {
+      day,
+      passport: { load: students + profile.non_teaching_staff! + teachersInPerson, limit },
+    };
+  });
+  const peak = days.reduce((a, b) => (b.passport.load > a.passport.load ? b : a));
+  return {
+    model: '1.1',
+    days,
+    class_days: tt.day_formats.map((f) => {
+      const c = classes.find((x) => x.class_id === f.class_id)!;
+      return {
+        ...f,
+        reason:
+          f.format === 'remote'
+            ? 'Ліміт укриття на цей день вичерпано'
+            : c.in_person_priority
+              ? 'Клас має пріоритет очного навчання'
+              : 'Місць в укритті вистачає',
+      };
+    }),
+    summary: {
+      remote_class_days: tt.day_formats.filter((f) => f.format === 'remote').length,
+      peak: { day: peak.day, load: peak.passport.load, limit },
+      build_ms: 3200,
+      classes_without_in_person_days: [],
+    },
+    validation: { ok: true, conflicts: [] },
+  };
+}
+
+export function summary(tt: TimetableDetail): TimetableSummary {
+  return {
+    timetable_id: tt.timetable_id,
+    kind: 'main',
+    model: tt.model,
+    state: tt.state,
+    effective_from: tt.effective_from,
+    published_at: tt.published_at,
+    data_changed_since_build: tt.data_changed_since_build,
+    created_at: tt.created_at,
+  };
+}
+
+export const schools: SchoolListItem[] = [
+  { school_id: 'sch1', name: 'Ліцей № 17', login: 'lyceum17', created_at: '2026-10-01T09:00:00Z' },
+  { school_id: 'sch2', name: 'Гімназія № 5', login: 'gym5', created_at: '2026-10-14T12:30:00Z' },
+];
+
+const generations = new Map<string, number>();
+
+export function tokens(): AccessToken[] {
+  const origin = window.location.origin;
+  const make = (
+    scope: 'class' | 'teacher',
+    tokenId: string,
+    targetId: string,
+    label: string,
+    hash: string,
+  ): AccessToken => ({
+    token_id: tokenId,
+    scope,
+    target_id: targetId,
+    target_label: label,
+    generation: generations.get(tokenId) ?? 1,
+    url: `${origin}/${scope === 'class' ? 'c' : 't'}#${hash}`,
+  });
+  return [
+    ...classes.map((c, i) =>
+      make('class', `qc${i + 1}`, c.class_id, c.name, i === 0 ? 'demo-class' : `demo-c${i + 1}`),
+    ),
+    ...teachers.map((t, i) =>
+      make(
+        'teacher',
+        `qt${i + 1}`,
+        t.teacher_id,
+        t.label,
+        i === 0 ? 'demo-teacher' : `demo-t${i + 1}`,
+      ),
+    ),
+  ];
+}
+
+export function rotate(tokenId: string): AccessToken | undefined {
+  generations.set(tokenId, (generations.get(tokenId) ?? 1) + 1);
+  return tokens().find((t) => t.token_id === tokenId);
+}

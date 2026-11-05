@@ -16,6 +16,13 @@ const queryClient = new QueryClient({
   },
 });
 
+// `npm run dev:mock`: фейковий бекенд і вхід без Keycloak. У прод-збірці MODE = 'production',
+// тож гілка й модуль src/mocks вирізаються.
+if (import.meta.env.MODE === 'mock') {
+  const { installMockServer } = await import('@/mocks/server');
+  installMockServer();
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>

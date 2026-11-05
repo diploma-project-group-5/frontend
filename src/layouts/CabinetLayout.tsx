@@ -63,7 +63,7 @@ export function CabinetLayout() {
         <div className={s.user}>
           <span className="muted">{username}</span>
           <button type="button" className={s.logout} onClick={logout}>
-            Вийти
+            {import.meta.env.MODE === 'mock' ? 'Змінити роль' : 'Вийти'}
           </button>
         </div>
       </aside>

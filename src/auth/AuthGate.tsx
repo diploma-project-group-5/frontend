@@ -12,6 +12,14 @@ export function AuthGate({ children }: { children?: ReactNode }) {
 
   useEffect(() => {
     let alive = true;
+    if (import.meta.env.MODE === 'mock') {
+      void import('@/mocks/auth').then(
+        ({ mockAuth }) => alive && setState({ status: 'ready', value: mockAuth() }),
+      );
+      return () => {
+        alive = false;
+      };
+    }
     initKeycloak()
       .then(() => {
         if (alive) setState({ status: 'ready', value: { ...currentIdentity(), logout } });
