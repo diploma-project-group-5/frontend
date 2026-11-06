@@ -1,6 +1,7 @@
 import type {
   AccessToken,
   ClassDayFormat,
+  Conflict,
   CurriculumRow,
   Day,
   Lesson,
@@ -147,17 +148,31 @@ export function makeTimetable(id: string, seed: number): TimetableDetail {
         const queue = rows.flatMap((r) => Array<CurriculumRow>(r.hours_per_week).fill(r));
         const shift = queue.length ? (ci + seed) % queue.length : 0;
         const ordered = [...queue.slice(shift), ...queue.slice(0, shift)];
-        ordered.forEach((r, k) => {
-          const lesson_no = Math.floor(k / DAYS.length) + 1;
-          if (lesson_no > perDay) return; // понад максимум — «не розміщено»
+        // слоти «урок 1 пн…пт, урок 2 пн…пт…», щоб предмет розходився по днях
+        const slots = Array.from({ length: perDay * DAYS.length }, (_, k) => ({
+          day: DAYS[k % DAYS.length]!,
+          lesson_no: Math.floor(k / DAYS.length) + 1,
+        }));
+        const used = new Set<number>();
+        for (const r of ordered) {
+          // як солвер: без накладок вчителя; не знайшлося слоту — урок «не розміщено»
+          const k = slots.findIndex(
+            (sl, i) =>
+              !used.has(i) &&
+              !lessons.some(
+                (l) =>
+                  l.teacher_id === r.teacher_id && l.day === sl.day && l.lesson_no === sl.lesson_no,
+              ),
+          );
+          if (k < 0) continue;
+          used.add(k);
           lessons.push({
             class_id: c.class_id,
-            day: DAYS[k % DAYS.length]!,
-            lesson_no,
+            ...slots[k]!,
             subject_id: r.subject_id,
             teacher_id: r.teacher_id,
           });
-        });
+        }
         return;
       }
       for (const day of DAYS) {
@@ -193,6 +208,52 @@ export function makeTimetable(id: string, seed: number): TimetableDetail {
   };
 }
 
+/**
+ * Спрощений validator-lib для мока: накладки вчителів, недоступні дні, номер уроку ≤ уроків на день.
+ * Правило «вчитель за день в одному форматі» мок-солвер не моделює, тож тут його немає.
+ */
+const DAY_NAME = ['', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'] as const;
+
+export function validateTimetable(tt: TimetableDetail): Conflict[] {
+  const out: Conflict[] = [];
+  const perDay = profile.lessons_per_day ?? 6;
+  const name = (id: string) => tt.classes.find((c) => c.class_id === id)?.name ?? id;
+  const label = (id: string) => tt.teachers.find((x) => x.teacher_id === id)?.label ?? id;
+  const seen = new Map<string, Lesson>();
+  for (const l of tt.lessons) {
+    if (l.lesson_no > perDay) {
+      out.push({
+        rule: 'lesson_out_of_range',
+        class_id: l.class_id,
+        day: l.day,
+        lesson_no: l.lesson_no,
+        message: `${name(l.class_id)}: ${l.lesson_no} урок, а уроків на день ${perDay}`,
+      });
+    }
+    const t = teachers.find((x) => x.teacher_id === l.teacher_id);
+    if (t?.unavailable_days.includes(l.day)) {
+      out.push({
+        rule: 'teacher_unavailable',
+        teacher_id: l.teacher_id,
+        day: l.day,
+        message: `${t.label} не працює в цей день`,
+      });
+    }
+    const key = `${l.teacher_id}|${l.day}|${l.lesson_no}`;
+    const other = seen.get(key);
+    if (other) {
+      out.push({
+        rule: 'teacher_clash',
+        teacher_id: l.teacher_id,
+        day: l.day,
+        lesson_no: l.lesson_no,
+        message: `${label(l.teacher_id)}: накладка ${name(other.class_id)} і ${name(l.class_id)} (${DAY_NAME[l.day]}, ${l.lesson_no} урок)`,
+      });
+    } else seen.set(key, l);
+  }
+  return out;
+}
+
 /** Формула 1.1: учні очних класів + персонал + вчителі з очними уроками ≤ паспортна місткість. */
 export function makeLoad(tt: TimetableDetail): TimetableLoad {
   const limit = profile.shelter_capacity!;
@@ -222,7 +283,10 @@ export function makeLoad(tt: TimetableDetail): TimetableLoad {
       build_ms: 3200,
       classes_without_in_person_days: [],
     },
-    validation: { ok: true, conflicts: [] },
+    validation: (() => {
+      const conflicts = validateTimetable(tt);
+      return { ok: conflicts.length === 0, conflicts };
+    })(),
   };
 }
 

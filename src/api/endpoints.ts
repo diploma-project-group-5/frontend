@@ -7,6 +7,7 @@ import type {
   Bell,
   ClassInput,
   CurriculumRow,
+  Day,
   Holidays,
   Job,
   JobAccepted,
@@ -76,6 +77,22 @@ export const timetableApi = {
   get: (id: string) => api.get<TimetableDetail>(`/timetable/timetables/${encodeURIComponent(id)}`),
   load: (id: string) =>
     api.get<TimetableLoad>(`/timetable/timetables/${encodeURIComponent(id)}/load`),
+  /**
+   * Етап 2 · ручна правка: перенести урок класу в слот {day, lesson_no}; зайнятий слот класу — обмін.
+   * Сервер перевіряє зміну validator-lib: конфлікт → 409 з conflicts[]; опублікована → 409 published_readonly.
+   */
+  moveLesson: (
+    id: string,
+    from: { class_id: string; day: Day; lesson_no: number },
+    to: { day: Day; lesson_no: number },
+  ) =>
+    api.patch<TimetableDetail>(
+      `/timetable/timetables/${encodeURIComponent(id)}/lessons/${encodeURIComponent(from.class_id)}/${from.day}/${from.lesson_no}`,
+      to,
+    ),
+  /** Етап 2 · копія версії main у стані validated, щоб правити опубліковану. */
+  copy: (id: string) =>
+    api.post<TimetableDetail>(`/timetable/timetables/${encodeURIComponent(id)}:copy`),
   publish: (id: string, body: PublishRequest) =>
     api.post<PublishResponse>(`/timetable/timetables/${encodeURIComponent(id)}:publish`, body),
 
