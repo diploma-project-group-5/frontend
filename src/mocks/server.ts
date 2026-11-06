@@ -5,6 +5,7 @@ import type {
   AlertPlan,
   AuditEntry,
   CurriculumRow,
+  Day,
   Job,
   PublicDay,
   PublicTimetable,
@@ -545,6 +546,57 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
       'діє з': formatDate(req.effective_from),
     });
     return json(200, { timetable: d.summary(tt), warnings: { lost_substitutions: [] } });
+  }
+  // ── етап 2: ручна правка й копія ──
+  if (
+    (m = path.match(/^\/timetable\/timetables\/([^/:]+)\/lessons\/([^/]+)\/(\d)\/(\d+)$/)) &&
+    method === 'PATCH'
+  ) {
+    const tt = versions.get(m[1]!);
+    if (!tt) return notFound();
+    if (tt.state === 'published') {
+      return problem(409, 'published_readonly', 'Опубліковану версію не правлять');
+    }
+    const [classId, day, no] = [m[2]!, Number(m[3]) as Day, Number(m[4])];
+    const to = body as { day: Day; lesson_no: number };
+    const a = tt.lessons.find((l) => l.class_id === classId && l.day === day && l.lesson_no === no);
+    if (!a) return notFound();
+    const b = tt.lessons.find(
+      (l) => l.class_id === classId && l.day === to.day && l.lesson_no === to.lesson_no,
+    );
+    // пробна зміна на копії уроків: зайнятий слот класу — обмін
+    const moved = tt.lessons.map((l) =>
+      l === a
+        ? { ...l, day: to.day, lesson_no: to.lesson_no }
+        : l === b
+          ? { ...l, day, lesson_no: no }
+          : l,
+    );
+    const touched = (l: { teacher_id: string }) =>
+      l.teacher_id === a.teacher_id || (b && l.teacher_id === b.teacher_id);
+    const conflicts = d
+      .validateTimetable({ ...tt, lessons: moved })
+      .filter((c) => !c.teacher_id || touched({ teacher_id: c.teacher_id }));
+    if (conflicts.length) {
+      return problem(409, 'conflicts', 'Зміна порушує правила розкладу', { conflicts });
+    }
+    tt.lessons = moved;
+    return json(200, tt);
+  }
+  if ((m = path.match(/^\/timetable\/timetables\/([^/:]+):copy$/)) && method === 'POST') {
+    const src = versions.get(m[1]!);
+    if (!src || src.kind !== 'main') return notFound();
+    const copy: TimetableDetail = {
+      ...structuredClone(src),
+      timetable_id: crypto.randomUUID(),
+      state: 'validated',
+      effective_from: null,
+      published_at: null,
+      created_at: new Date().toISOString(),
+    };
+    delete copy.order;
+    versions.set(copy.timetable_id, copy);
+    return json(201, copy);
   }
   if ((m = path.match(/^\/timetable\/timetables\/([^/:]+)\/load$/))) {
     const tt = versions.get(m[1]!);

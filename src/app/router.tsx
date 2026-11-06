@@ -104,8 +104,8 @@ export const routes: RouteObject[] = [
                   {
                     path: 'timetables/:id',
                     lazy: page(
-                      () => import('@/pages/scheduler/TimetablePage'),
-                      (m) => m.TimetablePage,
+                      () => import('@/pages/scheduler/TimetablesPage'),
+                      (m) => m.TimetablesPage,
                     ),
                   },
                   {

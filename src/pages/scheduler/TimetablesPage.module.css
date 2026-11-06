@@ -1,0 +1,370 @@
+/* «Розклад» — редактор як у прототипі: день — усі класи */
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.grow {
+  flex: 1;
+}
+
+.seg {
+  display: inline-flex;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+  box-shadow: var(--sh);
+  max-width: 100%;
+  overflow-x: auto;
+}
+.seg button {
+  border: 0;
+  background: none;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.seg button:hover {
+  color: var(--text);
+}
+.seg button[aria-pressed='true'] {
+  background: var(--text);
+  color: var(--surface);
+}
+
+.dtabs {
+  display: grid;
+  grid-template-columns: repeat(var(--n), minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.dtab {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 8px 12px;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  color: var(--text);
+  font: inherit;
+}
+.dtab small {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dtab[aria-pressed='true'] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+}
+.dtabOver small {
+  color: var(--bad);
+}
+
+.edl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 250px;
+  gap: 16px;
+  align-items: start;
+}
+.edm {
+  min-width: 0;
+}
+.wkf {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.wkf h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+@media (max-width: 1100px) {
+  .edl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.dload {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.bar {
+  position: relative;
+  flex: 1;
+  min-width: 120px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+}
+.bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: var(--in);
+}
+.bar i.over {
+  background: var(--bad);
+}
+.bar b {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  background: var(--text);
+}
+.over {
+  color: var(--bad);
+}
+
+.status {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  padding: 7px 12px;
+  border-radius: var(--r2);
+  background: var(--surface2);
+  margin-bottom: 10px;
+}
+.statusBad {
+  background: color-mix(in srgb, var(--bad) 11%, transparent);
+  color: var(--bad);
+}
+.statusOk {
+  color: var(--ok);
+}
+.status ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.gw {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  max-height: 70vh;
+}
+table.dg {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 13px;
+  table-layout: fixed;
+}
+.dg th,
+.dg td {
+  border-bottom: 1px solid var(--line);
+  padding: 0;
+  text-align: left;
+  vertical-align: middle;
+}
+.dg thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface2);
+  z-index: 2;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 7px 10px;
+}
+.dg thead th small {
+  display: block;
+  font-weight: 400;
+  font-family: var(--m);
+  font-size: 11.5px;
+}
+.dg .cls {
+  width: 110px;
+  padding: 6px 10px;
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+  z-index: 1;
+  border-right: 1px solid var(--line);
+}
+.dg thead .cls {
+  z-index: 3;
+  background: var(--surface2);
+}
+.dg .cls span {
+  display: block;
+  font-weight: 650;
+}
+.dg tr.out td {
+  background: color-mix(in srgb, var(--out) 4%, var(--surface));
+}
+
+.fmtb {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--in);
+}
+.fmtb::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.fmtb.out {
+  color: var(--out);
+}
+.fmtb.out::before {
+  background: transparent;
+  border: 1.5px solid currentColor;
+  width: 5px;
+  height: 5px;
+}
+.fmtb:hover {
+  text-decoration: underline;
+}
+
+.cell {
+  height: 44px;
+}
+.tgt {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.les,
+.slot {
+  display: block;
+  width: calc(100% - 6px);
+  margin: 2px 3px;
+  min-height: 38px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  line-height: 1.2;
+  overflow: hidden;
+}
+.les b,
+.les small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.les b {
+  font-weight: 550;
+  font-size: 13px;
+}
+.les small {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+button.les {
+  cursor: grab;
+}
+button.les:hover {
+  border-color: var(--line);
+  background: var(--surface);
+}
+.slot {
+  cursor: pointer;
+}
+.slot:hover {
+  border-color: var(--line);
+  border-style: dashed;
+}
+.clash {
+  border-color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 6%, var(--surface));
+}
+.sel {
+  outline: 2px solid var(--accent);
+  background: var(--surface);
+}
+
+table.wf {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+}
+.wf th,
+.wf td {
+  padding: 4px 3px;
+  text-align: center;
+  border: 0;
+}
+.wf th {
+  color: var(--muted);
+  font-weight: 600;
+}
+.wf td:first-child {
+  text-align: left;
+  font-weight: 600;
+}
+.wf .on {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.wf th.on {
+  color: var(--accent);
+}
+.fd {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--in);
+  vertical-align: middle;
+}
+.fd.out {
+  background: transparent;
+  border: 2px solid var(--out);
+  width: 5px;
+  height: 5px;
+}
+.legend {
+  display: flex;
+  gap: 12px;
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.versions {
+  margin-top: 16px;
+}
