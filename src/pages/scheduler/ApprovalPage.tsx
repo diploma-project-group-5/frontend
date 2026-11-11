@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router';
 import { timetableApi } from '@/api/endpoints';
 import type { TimetableDetail } from '@/api/types';
 import { mainPhases } from '@/lib/phases';
-import { DAY_SHORT, todayKyiv } from '@/lib/time';
+import { DAY_SHORT, peakText, todayKyiv } from '@/lib/time';
 import { Card, FormatBadge, Notice, PageHeader, ProblemNotice, Spinner, Stack } from '@/ui';
 import { PublishForm } from './PublishForm';
 
@@ -109,8 +109,7 @@ function ChangesVsCurrent({ id, currentId }: { id: string; currentId?: string })
       {load.data && (
         <p className="muted">
           Дистанційних класо-днів: {load.data.summary.remote_class_days} · пік навантаження:{' '}
-          {load.data.summary.peak.load} / {load.data.summary.peak.limit} (
-          {DAY_SHORT[load.data.summary.peak.day]})
+          {peakText(load.data.summary.peak)}
         </p>
       )}
       {cur.data &&

@@ -16,7 +16,7 @@ export type Uuid = string;
 /** Навчальний день: 1 = пн … 6 = сб. */
 export type Day = 1 | 2 | 3 | 4 | 5 | 6;
 export type Model = '1.1' | '1.2';
-export type DayFormat = 'in_person' | 'remote'; // припущення щодо назв значень
+export type DayFormat = 'in_person' | 'remote';
 
 // ───────────── помилки ─────────────
 
@@ -30,17 +30,54 @@ export type ProblemCode =
   | 'alert_plan_locked'
   | (string & {});
 
-/** Елемент conflicts[]: клас, день, правило (розділ 05). Точна форма — у contracts. */
+/** Коди правил: contracts/schemas/events/conflict.v1.json (solver і validator-lib). */
+export type ConflictRule =
+  | 'staff_over_passport'
+  | 'class_hours_exceed_slots'
+  | 'teacher_weekly_limit'
+  | 'teacher_hours_exceed_available_slots'
+  | 'teacher_unavailable_all_days'
+  | 'row_day_cap'
+  | 'alert_bells'
+  | 'packing'
+  | 'invalid_input'
+  | 'class_not_active'
+  | 'subject_not_active'
+  | 'teacher_not_active'
+  | 'day_not_school_day'
+  | 'lesson_no_out_of_range'
+  | 'day_format_missing'
+  | 'day_format_duplicate'
+  | 'in_person_without_lessons'
+  | 'class_double_booked'
+  | 'teacher_double_booked'
+  | 'teacher_mixed_format'
+  | 'teacher_unavailable_day'
+  | 'lesson_not_in_plan'
+  | 'teacher_not_in_plan'
+  | 'plan_hours_mismatch'
+  | 'capacity_exceeded'
+  | 'no_shelter_in_person';
+
+/**
+ * Елемент conflicts[] (409 stale / conflicts, GET /jobs/{id}, /load) — форма з
+ * contracts/schemas/events/conflict.v1.json. Лише ідентифікатори й числа: назви й тексти
+ * підставляє клієнт (src/lib/conflicts.ts).
+ */
 export interface Conflict {
-  rule: string;
+  rule: ConflictRule | (string & {});
   class_id?: Uuid;
   teacher_id?: Uuid;
   subject_id?: Uuid;
   day?: Day;
   lesson_no?: number;
-  /** для ліміту 1.2 validator-lib називає порушену умову */
-  limit?: 'seats' | 'passport';
-  message?: string;
+  /** яку умову місткості порушено: seats (лише модель 1.2) або passport */
+  condition?: 'seats' | 'passport';
+  /** спостережена величина (навантаження, уроки) для правил з лімітом */
+  value?: number;
+  limit?: number;
+  /** true — евристична підказка (напр. найзавантаженіші вчителі для packing), не доказ */
+  hint?: boolean;
 }
 
 export interface Warnings {
@@ -219,9 +256,10 @@ export interface ClassDayFormat {
 export interface TimetableDetail extends Omit<TimetableSummary, 'kind'> {
   kind: 'main' | 'alert';
   snapshot_version: number;
-  /** копія назв класів і підписів вчителів зі знімка */
+  /** копія назв класів, підписів вчителів і предметів зі знімка */
   classes: { class_id: Uuid; name: string }[];
   teachers: { teacher_id: Uuid; label: string }[];
+  subjects?: { subject_id: Uuid; name: string; short_name: string }[];
   lessons: Lesson[];
   day_formats: ClassDayFormat[];
   order?: { order_no: string; order_date: IsoDate; approved_by: string };
@@ -230,26 +268,41 @@ export interface TimetableDetail extends Omit<TimetableSummary, 'kind'> {
 export interface LimitUsage {
   load: number;
   limit: number;
+  ok?: boolean;
+}
+
+export interface LoadPeak {
+  condition: 'seats' | 'passport';
+  day: Day;
+  load: number;
+  limit: number;
 }
 
 export interface TimetableLoad {
   model: Model;
   days: {
     day: Day;
+    students_in_person?: number;
+    teachers_on_site?: number;
     /** 1.1: одна умова (паспорт); 1.2: обидві окремо */
     passport: LimitUsage;
     seats?: LimitUsage;
+    ok?: boolean;
   }[];
   class_days: {
     class_id: Uuid;
     day: Day;
     format: DayFormat;
+    lessons?: number;
     reason: string; // ліміт дня, пріоритет, «не в укритті»
   }[];
   summary: {
     remote_class_days: number;
-    peak: { day: Day; load: number; limit: number };
-    build_ms: number;
+    /** пік за паспортною місткістю; null, якщо днів немає */
+    peak: { day: Day; load: number; limit: number } | null;
+    /** пік окремо по кожній умові */
+    peaks?: LoadPeak[];
+    build_ms: number | null;
     classes_without_in_person_days: Uuid[];
   };
   validation: { ok: boolean; conflicts: Conflict[] };
@@ -300,6 +353,32 @@ export interface Holidays {
   holiday_to: IsoDate | null;
 }
 
+// ───────────── відсутності (етап 2) ─────────────
+
+export interface AbsenceInput {
+  teacher_id: Uuid;
+  date_from: IsoDate;
+  date_to: IsoDate;
+  /** без поля — увесь день */
+  lesson_nos?: number[];
+}
+
+/** 202 на POST /absences: задача substitution на кожну навчальну дату з уроками. */
+export interface AbsenceAccepted {
+  absence_id: Uuid;
+  job_ids: Uuid[];
+}
+
+export interface Absence {
+  absence_id: Uuid;
+  teacher_id: Uuid;
+  date_from: IsoDate;
+  date_to: IsoDate;
+  lesson_nos: number[] | null;
+  created_at: IsoDateTime;
+  jobs: { job_id: Uuid; date: IsoDate; state: JobState }[];
+}
+
 // ───────────── QR ─────────────
 
 export type TokenScope = 'class' | 'teacher';
@@ -329,10 +408,14 @@ export interface PublicLesson {
 
 export interface PublicDay {
   date: IsoDate;
-  format: DayFormat;
+  /**
+   * null — канікули (тоді holiday: true) або день, коли опублікований розклад ще не діє
+   * (lessons: []); на сторінці вчителя — і день без його уроків.
+   */
+  format: DayFormat | null;
   lessons: PublicLesson[];
   /** етап 2 */
-  holiday?: boolean;
+  holiday?: true;
   holiday_from?: IsoDate;
   holiday_to?: IsoDate;
 }

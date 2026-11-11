@@ -1,5 +1,8 @@
 import { api, request } from './http';
 import type {
+  Absence,
+  AbsenceAccepted,
+  AbsenceInput,
   AccessToken,
   AlertHours,
   AlertPlan,
@@ -117,6 +120,11 @@ export const timetableApi = {
     api.get<Record<string, unknown>>(`/timetable/teachers/${encodeURIComponent(id)}/export`),
   getHolidays: () => api.get<Holidays>('/timetable/holidays'),
   putHolidays: (body: Holidays) => api.put<Holidays>('/timetable/holidays', body),
+
+  /** Етап 2 · відсутність вчителя → 202: absence_id (для скасування) і задачі substitution. */
+  createAbsence: (body: AbsenceInput) => api.post<AbsenceAccepted>('/timetable/absences', body),
+  absences: () => api.get<Absence[]>('/timetable/absences'),
+  deleteAbsence: (id: string) => api.delete<void>(`/timetable/absences/${encodeURIComponent(id)}`),
 
   accessTokens: (type: TokenScope) =>
     api.get<AccessToken[]>('/timetable/access-tokens', { query: { type } }),

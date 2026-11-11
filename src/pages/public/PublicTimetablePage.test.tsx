@@ -91,6 +91,33 @@ describe('сторінка класу за QR', () => {
     expect((init.headers as Record<string, string>)['X-Access-Token']).toBe('good.token.mac');
   });
 
+  it('format: null — канікули й день, коли розклад ще не діє, рендеряться без формату', async () => {
+    mockFetch(200, {
+      ...sample,
+      weeks: [
+        {
+          week: '2026-W45',
+          days: [
+            { date: '2026-11-05', format: null, lessons: [] },
+            {
+              date: '2026-11-06',
+              format: null,
+              lessons: [],
+              holiday: true,
+              holiday_from: '2026-11-06',
+              holiday_to: '2026-11-08',
+            },
+          ],
+        },
+      ],
+    } satisfies PublicTimetable);
+    renderAt('#good.token.mac');
+    expect(await screen.findByText('Розклад ще не діє')).toBeInTheDocument();
+    expect(screen.getByText(/Канікули з/)).toBeInTheDocument();
+    expect(screen.queryByText('Очно')).not.toBeInTheDocument();
+    expect(screen.queryByText('Дистанційно')).not.toBeInTheDocument();
+  });
+
   it('до першої публікації — «ще не опубліковано»', async () => {
     mockFetch(200, { ...sample, state: 'not_published', weeks: [] });
     renderAt('#good.token.mac');

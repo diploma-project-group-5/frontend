@@ -25,7 +25,9 @@ describe('request', () => {
         title: 'Дані змінилися',
         status: 409,
         code: 'stale',
-        conflicts: [{ rule: 'capacity', day: 3, limit: 'passport' }],
+        conflicts: [
+          { rule: 'capacity_exceeded', day: 2, condition: 'seats', value: 160, limit: 150 },
+        ],
       },
       'application/problem+json',
     );

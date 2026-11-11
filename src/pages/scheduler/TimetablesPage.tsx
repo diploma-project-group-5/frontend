@@ -5,7 +5,8 @@ import { schoolApi, timetableApi } from '@/api/endpoints';
 import { isApiError } from '@/api/http';
 import type { Day, Lesson, TimetableLoad, TimetableSummary } from '@/api/types';
 import { isTerminal, JOB_STATE_LABEL, useJob } from '@/api/useJob';
-import { DAY_SHORT, formatDate, publishedPhase, todayKyiv } from '@/lib/time';
+import { conflictNames, describeConflict, useConflictNames } from '@/lib/conflicts';
+import { DAY_SHORT, formatDate, peakText, publishedPhase, todayKyiv } from '@/lib/time';
 import { Badge, Button, Chip, Notice, PageHeader, ProblemNotice, Spinner } from '@/ui';
 import { IconOk, IconRefresh, IconWarn } from '@/ui/icons';
 import s from './TimetablesPage.module.css';
@@ -160,6 +161,7 @@ function JobStatus({
   onOpen: (id: string) => void;
 }) {
   const job = useJob(jobId);
+  const names = useConflictNames();
   if (job.isPending) return <Spinner label="Запускаємо побудову…" />;
   if (job.error) {
     if (isApiError(job.error) && job.error.status === 404) {
@@ -204,7 +206,7 @@ function JobStatus({
       {j.conflicts && j.conflicts.length > 0 && (
         <ul>
           {j.conflicts.map((c, i) => (
-            <li key={i}>{c.message ?? c.rule}</li>
+            <li key={i}>{describeConflict(c, names)}</li>
           ))}
         </ul>
       )}
@@ -275,6 +277,12 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
   const subjects = useQuery({ queryKey: ['subjects'], queryFn: schoolApi.listSubjects });
   const bells = useQuery({ queryKey: ['bells'], queryFn: schoolApi.getBells });
   const profile = useQuery({ queryKey: ['profile'], queryFn: schoolApi.getProfile });
+  // назви для conflicts[]: копії класів і підписів із версії (там і «Вчитель #N»), предмети — з закладу
+  const names = conflictNames({
+    classes: tt.data?.classes,
+    teachers: tt.data?.teachers,
+    subjects: tt.data?.subjects ?? subjects.data,
+  });
 
   const [day, setDay] = useState<Day | null>(null);
   const [sel, setSel] = useState<Slot | null>(null);
@@ -297,7 +305,7 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
         setStatus({
           tone: 'bad',
           text: 'Переміщення недоступне, розклад не змінено:',
-          list: e.conflicts.map((c) => c.message ?? c.rule),
+          list: e.conflicts.map((c) => describeConflict(c, names)),
         });
       } else {
         setStatus({ tone: 'bad', text: 'Не вдалося зберегти зміну. Спробуйте ще раз.' });
@@ -469,7 +477,7 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
               <p>Перевірка знайшла порушення:</p>
               <ul>
                 {conflicts.map((c, i) => (
-                  <li key={i}>{c.message ?? c.rule}</li>
+                  <li key={i}>{describeConflict(c, names)}</li>
                 ))}
               </ul>
             </Notice>
@@ -594,8 +602,7 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
           {load.data && (
             <p className="muted">
               Дистанційних класо-днів: {load.data.summary.remote_class_days} · пік:{' '}
-              {load.data.summary.peak.load} / {load.data.summary.peak.limit} (
-              {DAY_SHORT[load.data.summary.peak.day]}) · модель {v.model}
+              {peakText(load.data.summary.peak)} · модель {v.model}
             </p>
           )}
         </div>

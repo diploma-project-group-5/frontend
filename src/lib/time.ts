@@ -92,3 +92,8 @@ export function formatDayHeading(date: IsoDate): string {
 }
 
 export const DAY_SHORT = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'] as const;
+
+/** Пік навантаження укриття за паспортом: «150 / 160 (Ср)»; сервер дає null, якщо днів немає. */
+export function peakText(p: { day: number; load: number; limit: number } | null): string {
+  return p ? `${p.load} / ${p.limit} (${DAY_SHORT[p.day] ?? ''})` : '—';
+}
