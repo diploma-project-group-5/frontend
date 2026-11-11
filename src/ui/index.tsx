@@ -3,6 +3,7 @@ import { useId } from 'react';
 import { NavLink } from 'react-router';
 import { ApiError } from '@/api/http';
 import type { DayFormat } from '@/api/types';
+import { describeConflict, useCachedConflictNames } from '@/lib/conflicts';
 import s from './ui.module.css';
 
 const cx = (...c: (string | false | undefined)[]) => c.filter(Boolean).join(' ');
@@ -165,6 +166,7 @@ const CODE_TEXT: Record<string, string> = {
 };
 
 export function ProblemNotice({ error }: { error: unknown }) {
+  const names = useCachedConflictNames();
   if (!error) return null;
   if (error instanceof ApiError) {
     const text = (error.code && CODE_TEXT[error.code]) || error.detail || error.title;
@@ -174,10 +176,7 @@ export function ProblemNotice({ error }: { error: unknown }) {
         {error.conflicts.length > 0 && (
           <ul>
             {error.conflicts.map((c, i) => (
-              <li key={i}>
-                {c.message ?? c.rule}
-                {c.limit && ` (${c.limit === 'seats' ? 'навчальні місця' : 'паспортна місткість'})`}
-              </li>
+              <li key={i}>{describeConflict(c, names)}</li>
             ))}
           </ul>
         )}

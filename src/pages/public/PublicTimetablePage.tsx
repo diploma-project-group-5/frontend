@@ -118,10 +118,13 @@ function DayCard({ day, scope }: { day: PublicDay; scope: 'class' | 'teacher' })
     <article className={s.day}>
       <div className={s.dayHead}>
         <h3>{formatDayHeading(day.date)}</h3>
-        {day.lessons.length > 0 && <FormatBadge format={day.format} />}
+        {day.format && day.lessons.length > 0 && <FormatBadge format={day.format} />}
       </div>
       {day.lessons.length === 0 ? (
-        <p className="muted">Уроків немає</p>
+        <p className="muted">
+          {/* у класу формат є в кожен день чинного розкладу; null — розклад на цю дату ще не діє */}
+          {scope === 'class' && day.format === null ? 'Розклад ще не діє' : 'Уроків немає'}
+        </p>
       ) : (
         <ol className={s.lessons}>
           {day.lessons.map((l) => (

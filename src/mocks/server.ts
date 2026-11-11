@@ -207,6 +207,12 @@ function publicTimetable(scope: 'class' | 'teacher'): PublicTimetable {
     const weekStart = addDays(monday, w * 7);
     const days: PublicDay[] = d.DAYS.map((day) => {
       const date = format(addDays(weekStart, day - 1), 'yyyy-MM-dd');
+      // як timetable-service: канікули — format null і holiday: true
+      if (holidays.holiday_from && holidays.holiday_to) {
+        const { holiday_from, holiday_to } = holidays;
+        if (date >= holiday_from && date <= holiday_to)
+          return { date, format: null, lessons: [], holiday: true, holiday_from, holiday_to };
+      }
       const fmt = current.day_formats.find((f) => f.class_id === cls.class_id && f.day === day)!;
       const lessons = current.lessons
         .filter(
@@ -224,7 +230,8 @@ function publicTimetable(scope: 'class' | 'teacher'): PublicTimetable {
             : { class_name: d.classes.find((c) => c.class_id === l.class_id)!.name }),
           substitution: w === 0 && day === 3 && l.lesson_no === 2,
         }));
-      return { date, format: fmt.format, lessons };
+      // у вчителя без уроків цього дня формату немає
+      return { date, format: scope === 'teacher' && !lessons.length ? null : fmt.format, lessons };
     });
     return { week: format(weekStart, "RRRR-'W'II"), days };
   });
@@ -323,7 +330,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     }
     if (method === 'DELETE') {
       if (d.plan.some((r) => r.subject_id === x.subject_id && r.hours_per_week > 0)) {
-        return problem(409, 'subject_in_curriculum', 'Предмет є в навчальному плані');
+        return problem(409, 'in_curriculum', 'Предмет є в навчальному плані');
       }
       x.archived_at = new Date().toISOString();
       dataChanged('Архівовано предмет', x.name);
@@ -394,7 +401,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     }
     if (method === 'DELETE') {
       if (d.plan.some((r) => r.teacher_id === t.teacher_id && r.hours_per_week > 0)) {
-        return problem(409, 'teacher_in_curriculum', 'Вчителя призначено в навчальному плані');
+        return problem(409, 'in_curriculum', 'Вчителя призначено в навчальному плані');
       }
       const ref = `Вчитель #${t.teacher_no}`;
       t.label = ref;
@@ -420,7 +427,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     if (bad)
       return problem(
         422,
-        'curriculum_invalid',
+        'unknown_reference',
         'Рядок плану з невідомим класом, предметом чи вчителем',
       );
     d.plan.splice(0, d.plan.length, ...rows);

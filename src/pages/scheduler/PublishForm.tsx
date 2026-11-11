@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { timetableApi } from '@/api/endpoints';
 import { isApiError } from '@/api/http';
 import type { PublishResponse } from '@/api/types';
+import { describeConflict, useConflictNames } from '@/lib/conflicts';
 import { formatDate, minEffectiveFrom, todayKyiv } from '@/lib/time';
 import { Button, Field, Notice, ProblemNotice, Stack } from '@/ui';
 
@@ -20,6 +21,7 @@ export function PublishForm({ timetableId }: { timetableId: string }) {
     effective_from: minFrom,
   });
   const [done, setDone] = useState<PublishResponse | null>(null);
+  const names = useConflictNames();
 
   const publish = useMutation({
     mutationFn: () => timetableApi.publish(timetableId, form),
@@ -108,7 +110,7 @@ export function PublishForm({ timetableId }: { timetableId: string }) {
             {publish.error.conflicts.length > 0 && (
               <ul>
                 {publish.error.conflicts.map((c, i) => (
-                  <li key={i}>{c.message ?? c.rule}</li>
+                  <li key={i}>{describeConflict(c, names)}</li>
                 ))}
               </ul>
             )}

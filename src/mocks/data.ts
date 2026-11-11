@@ -94,6 +94,11 @@ export const DAYS: Day[] = [1, 2, 3, 4, 5];
 
 /** Навантаження дня за формулою 1.1: учні очних класів + персонал + вчителі з очними уроками. */
 function dayLoad(day: Day, lessons: Lesson[], formats: ClassDayFormat[]) {
+  const p = dayPeople(day, lessons, formats);
+  return p.students + profile.non_teaching_staff! + p.teachers;
+}
+
+function dayPeople(day: Day, lessons: Lesson[], formats: ClassDayFormat[]) {
   const inPerson = formats.filter((f) => f.day === day && f.format === 'in_person');
   const students = inPerson.reduce(
     (sum, f) => sum + classes.find((c) => c.class_id === f.class_id)!.students,
@@ -104,7 +109,7 @@ function dayLoad(day: Day, lessons: Lesson[], formats: ClassDayFormat[]) {
       .filter((l) => l.day === day && inPerson.some((f) => f.class_id === l.class_id))
       .map((l) => l.teacher_id),
   ).size;
-  return students + profile.non_teaching_staff! + teachersInPerson;
+  return { students, teachers: teachersInPerson };
 }
 
 /** Як солвер: поки день не вміщається в ліміт, переводимо на дистанційне спершу класи без пріоритету. */
@@ -203,6 +208,11 @@ export function makeTimetable(id: string, seed: number): TimetableDetail {
       .filter((c) => !c.archived_at)
       .map(({ class_id, name }) => ({ class_id, name })),
     teachers: teachers.map(({ teacher_id, label }) => ({ teacher_id, label })),
+    subjects: subjects.map(({ subject_id, name, short_name }) => ({
+      subject_id,
+      name,
+      short_name,
+    })),
     lessons,
     day_formats,
   };
@@ -210,44 +220,35 @@ export function makeTimetable(id: string, seed: number): TimetableDetail {
 
 /**
  * Спрощений validator-lib для мока: накладки вчителів, недоступні дні, номер уроку ≤ уроків на день.
+ * Коди й поля — як у contracts/schemas/events/conflict.v1.json (без текстів: їх робить клієнт).
  * Правило «вчитель за день в одному форматі» мок-солвер не моделює, тож тут його немає.
  */
-const DAY_NAME = ['', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'] as const;
 
 export function validateTimetable(tt: TimetableDetail): Conflict[] {
   const out: Conflict[] = [];
   const perDay = profile.lessons_per_day ?? 6;
-  const name = (id: string) => tt.classes.find((c) => c.class_id === id)?.name ?? id;
-  const label = (id: string) => tt.teachers.find((x) => x.teacher_id === id)?.label ?? id;
   const seen = new Map<string, Lesson>();
   for (const l of tt.lessons) {
     if (l.lesson_no > perDay) {
       out.push({
-        rule: 'lesson_out_of_range',
+        rule: 'lesson_no_out_of_range',
         class_id: l.class_id,
         day: l.day,
         lesson_no: l.lesson_no,
-        message: `${name(l.class_id)}: ${l.lesson_no} урок, а уроків на день ${perDay}`,
+        limit: perDay,
       });
     }
     const t = teachers.find((x) => x.teacher_id === l.teacher_id);
     if (t?.unavailable_days.includes(l.day)) {
-      out.push({
-        rule: 'teacher_unavailable',
-        teacher_id: l.teacher_id,
-        day: l.day,
-        message: `${t.label} не працює в цей день`,
-      });
+      out.push({ rule: 'teacher_unavailable_day', teacher_id: l.teacher_id, day: l.day });
     }
     const key = `${l.teacher_id}|${l.day}|${l.lesson_no}`;
-    const other = seen.get(key);
-    if (other) {
+    if (seen.has(key)) {
       out.push({
-        rule: 'teacher_clash',
+        rule: 'teacher_double_booked',
         teacher_id: l.teacher_id,
         day: l.day,
         lesson_no: l.lesson_no,
-        message: `${label(l.teacher_id)}: накладка ${name(other.class_id)} і ${name(l.class_id)} (${DAY_NAME[l.day]}, ${l.lesson_no} урок)`,
       });
     } else seen.set(key, l);
   }
@@ -257,10 +258,17 @@ export function validateTimetable(tt: TimetableDetail): Conflict[] {
 /** Формула 1.1: учні очних класів + персонал + вчителі з очними уроками ≤ паспортна місткість. */
 export function makeLoad(tt: TimetableDetail): TimetableLoad {
   const limit = profile.shelter_capacity!;
-  const days = DAYS.map((day) => ({
-    day,
-    passport: { load: dayLoad(day, tt.lessons, tt.day_formats), limit },
-  }));
+  const days = DAYS.map((day) => {
+    const p = dayPeople(day, tt.lessons, tt.day_formats);
+    const load = dayLoad(day, tt.lessons, tt.day_formats);
+    return {
+      day,
+      students_in_person: p.students,
+      teachers_on_site: p.teachers,
+      passport: { load, limit, ok: load <= limit },
+      ok: load <= limit,
+    };
+  });
   const peak = days.reduce((a, b) => (b.passport.load > a.passport.load ? b : a));
   return {
     model: '1.1',
@@ -269,6 +277,7 @@ export function makeLoad(tt: TimetableDetail): TimetableLoad {
       const c = classes.find((x) => x.class_id === f.class_id)!;
       return {
         ...f,
+        lessons: tt.lessons.filter((l) => l.class_id === f.class_id && l.day === f.day).length,
         reason:
           f.format === 'remote'
             ? 'Ліміт укриття на цей день вичерпано'
@@ -280,11 +289,23 @@ export function makeLoad(tt: TimetableDetail): TimetableLoad {
     summary: {
       remote_class_days: tt.day_formats.filter((f) => f.format === 'remote').length,
       peak: { day: peak.day, load: peak.passport.load, limit },
+      peaks: [{ condition: 'passport', day: peak.day, load: peak.passport.load, limit }],
       build_ms: 3200,
       classes_without_in_person_days: [],
     },
     validation: (() => {
-      const conflicts = validateTimetable(tt);
+      const conflicts: Conflict[] = [
+        ...validateTimetable(tt),
+        ...days
+          .filter((x) => !x.ok)
+          .map((x) => ({
+            rule: 'capacity_exceeded' as const,
+            day: x.day,
+            condition: 'passport' as const,
+            value: x.passport.load,
+            limit,
+          })),
+      ];
       return { ok: conflicts.length === 0, conflicts };
     })(),
   };
