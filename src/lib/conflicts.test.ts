@@ -1,4 +1,6 @@
+import fc from 'fast-check';
 import type { Conflict } from '@/api/types';
+import { CONFLICT_RULES, conflictErrors } from '@/test/contracts';
 import { conflictNames, describeConflict } from './conflicts';
 
 const names = conflictNames({
@@ -41,5 +43,41 @@ describe('describeConflict', () => {
       'Вчитель: урок у недоступний день (понеділок).',
     );
     expect(describeConflict({ rule: 'something_new' })).toBe('Порушено правило something_new.');
+  });
+});
+
+describe('describeConflict проти contracts/conflict.v1.json', () => {
+  it('для кожного коду rule з контракту є власний текст', () => {
+    const generic = CONFLICT_RULES.filter((rule) =>
+      describeConflict({ rule }).startsWith('Порушено правило'),
+    );
+    expect(generic).toEqual([]);
+  });
+
+  it('будь-який конфлікт за схемою: непорожній текст без ідентифікаторів і «undefined»', () => {
+    const id = fc.constantFrom('c1', 't1', 's1', 'unknown-id-42');
+    const conflict = fc.record(
+      {
+        rule: fc.constantFrom(...CONFLICT_RULES),
+        class_id: id,
+        teacher_id: id,
+        subject_id: id,
+        day: fc.integer({ min: 1, max: 6 }),
+        lesson_no: fc.integer({ min: 1, max: 10 }),
+        condition: fc.constantFrom('seats' as const, 'passport' as const),
+        value: fc.nat(500),
+        limit: fc.nat(500),
+        hint: fc.boolean(),
+      },
+      { requiredKeys: ['rule'] },
+    );
+    fc.assert(
+      fc.property(conflict, (c) => {
+        expect(conflictErrors(c)).toEqual([]);
+        const text = describeConflict(c as Conflict, names);
+        expect(text.length).toBeGreaterThan(5);
+        expect(text).not.toMatch(/undefined|null|NaN|unknown-id-42/);
+      }),
+    );
   });
 });

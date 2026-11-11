@@ -4,6 +4,7 @@ import type {
   AlertHours,
   AlertPlan,
   AuditEntry,
+  Conflict,
   CurriculumRow,
   Day,
   Job,
@@ -523,13 +524,8 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     if (req.order_no.toLowerCase().includes('stale')) {
       return problem(409, 'stale', 'Дані закладу змінилися', {
         conflicts: [
-          {
-            rule: 'capacity',
-            day: 3,
-            limit: 'passport',
-            message: 'Ср: у будівлі 171 особа при паспортній місткості 160',
-          },
-        ],
+          { rule: 'capacity_exceeded', day: 3, condition: 'passport', value: 171, limit: 160 },
+        ] satisfies Conflict[],
       });
     }
     if (req.effective_from < minEffectiveFrom()) {
@@ -639,9 +635,13 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
   return problem(404, 'not_found', `Мок: немає обробника для ${method} ${path}`);
 }
 
-export function installMockServer() {
-  const realFetch = window.fetch.bind(window);
-  window.fetch = async (input, init) => {
+/**
+ * Підміняє fetch для /api/v1/*. Стан даних — у модулях src/mocks (новий після перезавантаження,
+ * у тестах — після vi.resetModules()). latency імітує мережу; у тестах — 0.
+ */
+export function installMockServer({ latency = 250, quiet = false } = {}) {
+  const realFetch = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = async (input, init) => {
     const url = new URL(
       input instanceof Request ? input.url : String(input),
       window.location.origin,
@@ -649,8 +649,11 @@ export function installMockServer() {
     if (!url.pathname.startsWith(config.apiBase + '/')) return realFetch(input, init);
     const path = url.pathname.slice(config.apiBase.length);
     const method = (init?.method ?? 'GET').toUpperCase();
-    await new Promise((r) => setTimeout(r, 250)); // імітація мережі
+    if (latency) await new Promise((r) => setTimeout(r, latency));
     return handle(url, path, method, init);
   };
-  console.info('[lad] мок-режим: /api/v1/* обслуговує src/mocks, Keycloak вимкнено');
+  if (!quiet) console.info('[lad] мок-режим: /api/v1/* обслуговує src/mocks, Keycloak вимкнено');
+  return () => {
+    globalThis.fetch = realFetch;
+  };
 }
