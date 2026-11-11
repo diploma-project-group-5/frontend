@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import s from './ui.module.css';
 
 /** Модальне вікно на нативному <dialog>: фокус, Esc і затемнення — від браузера. */
@@ -14,6 +14,8 @@ export function Modal({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  // свій id у кожного вікна: інакше два відкриті вікна (форма → QR) ділять один заголовок
+  const titleId = useId();
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
@@ -22,10 +24,10 @@ export function Modal({
   }, [open]);
 
   return (
-    <dialog ref={ref} className={s.modal} onClose={onClose} aria-labelledby="modal-title">
+    <dialog ref={ref} className={s.modal} onClose={onClose} aria-labelledby={titleId}>
       {open && (
         <>
-          <h2 id="modal-title">{title}</h2>
+          <h2 id={titleId}>{title}</h2>
           {children}
         </>
       )}

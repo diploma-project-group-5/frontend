@@ -17,7 +17,7 @@ React SPA за специфікацією MVP «Лад» (v24, 03.11.2026): ка
 | Стилі        | CSS Modules + токени з прототипу, шрифт Onest у збірці | CSP `default-src 'self'`: жодних сторонніх шрифтів і CDN            |
 | QR           | `qrcode.react` (SVG у браузері)                        | друк — HTML + print-CSS, без серверних PDF                          |
 | Час          | date-fns + @date-fns/tz                                | «сьогодні», ISO-тиждень і +7 днів — у Europe/Kyiv, не зоні браузера |
-| Тести        | Vitest + Testing Library                               |                                                                     |
+| Тести        | Vitest + Testing Library, coverage-v8, fast-check, ajv | як у сервісах і validator-lib; схеми — з пакета `@lad/contracts`    |
 
 ## Запуск
 
@@ -60,6 +60,35 @@ Keycloak і сервіси не потрібні: вхід фейковий, `/a
 npm run check
 ```
 
+### Тести
+
+Бібліотеки — ті самі, що в інших репозиторіях проєкту: Vitest із покриттям `@vitest/coverage-v8`
+(school-, tenant-, timetable-service), fast-check для властивостей (validator-lib), ajv і
+`@lad/contracts` для перевірки за JSON Schema (timetable-service).
+
+```bash
+npm test
+```
+
+```bash
+npm run test:watch
+```
+
+- **Сторінки** рендеряться з тим самим мок-бекендом, що й `npm run dev:mock` (`src/test/render.tsx`:
+  `startMockBackend()` дає свіжий стан даних на кожен тест, `renderPage()` — роутер у пам'яті й вхід
+  із потрібною роллю). Тести клацають, як користувач (Testing Library + user-event), і перевіряють
+  текст на екрані, а не внутрішній стан.
+- **Контракт.** `src/test/contracts.ts` перевіряє `conflicts[]` за `contracts/conflict.v1.json`:
+  кожен код `rule` має свій текст в інтерфейсі, а мок-бекенд відповідає формі схеми. Нове правило
+  в contracts — і тест підкаже додати текст.
+- **Властивості** (fast-check): дати в Europe/Kyiv, найраніша дата публікації, фази версій,
+  тексти конфліктів для будь-якого конфлікту за схемою.
+- **Покриття** (`vite.config.ts`): поріг 80 % рядків, 70 % гілок; `src/lib` — 95 % / 90 %. Мок-код і
+  обгортку keycloak-js у поріг не рахуємо.
+
+Пакет `@lad/contracts` встановлюється з архіву тегу на GitHub (`codeload…/v0.3.0`): у збірці Docker
+(alpine) немає git, тож git-залежність там не встановилась би. Нова версія contracts — новий URL тегу.
+
 ## Структура
 
 ```
@@ -68,13 +97,14 @@ src/
   auth/       keycloak-js, AuthGate, перевірка ролей sysadmin / scheduler
   app/        маршрути
   layouts/    кабінет з меню
-  lib/        час у Europe/Kyiv, токен QR
+  lib/        час у Europe/Kyiv, токен QR, тексти conflicts[]
   pages/
     admin/      реєстрація закладу (тимчасовий пароль показується один раз), список закладів
     scheduler/  розділи укладача (див. нижче); data/ — вкладки «Дані закладу»
     public/     сторінки за QR — без акаунта
     print/      аркуші QR класів і вчителів (print-CSS)
   ui/         токени, базові компоненти
+  test/       обв'язка тестів: мок-бекенд у пам'яті, рендер сторінки, схеми contracts
 nginx/        конфіг віддачі статики з заголовками безпеки
 ```
 

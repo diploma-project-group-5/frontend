@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { timetableApi } from '@/api/endpoints';
-import type { TimetableDetail } from '@/api/types';
+import type { PublishResponse, TimetableDetail } from '@/api/types';
 import { mainPhases } from '@/lib/phases';
 import { DAY_SHORT, peakText, todayKyiv } from '@/lib/time';
 import { Card, FormatBadge, Notice, PageHeader, ProblemNotice, Spinner, Stack } from '@/ui';
-import { PublishForm } from './PublishForm';
+import { PublishedNotice, PublishForm } from './PublishForm';
 
 /**
  * «Погодження» (прототип) = :publish з реквізитами наказу (розділ 05).
@@ -14,6 +15,7 @@ import { PublishForm } from './PublishForm';
 export function ApprovalPage() {
   const [params, setParams] = useSearchParams();
   const list = useQuery({ queryKey: ['timetables'], queryFn: timetableApi.list });
+  const [published, setPublished] = useState<{ res: PublishResponse; from: string } | null>(null);
 
   if (list.isPending) return <Spinner />;
   if (list.error) return <ProblemNotice error={list.error} />;
@@ -26,13 +28,16 @@ export function ApprovalPage() {
   return (
     <>
       <PageHeader title="Погодження" />
+      {published && <PublishedNotice res={published.res} effectiveFrom={published.from} />}
       {candidates.length === 0 ? (
-        <Card>
-          <p>
-            Немає версій, що чекають на погодження. Побудуйте нову у розділі{' '}
-            <Link to="/scheduler/timetables">«Розклад»</Link>.
-          </p>
-        </Card>
+        !published && (
+          <Card>
+            <p>
+              Немає версій, що чекають на погодження. Побудуйте нову у розділі{' '}
+              <Link to="/scheduler/timetables">«Розклад»</Link>.
+            </p>
+          </Card>
+        )
       ) : (
         <Stack>
           <Card>
@@ -74,7 +79,11 @@ export function ApprovalPage() {
           {selected && (
             <Card>
               <h2>Погодити й опублікувати</h2>
-              <PublishForm key={selected.timetable_id} timetableId={selected.timetable_id} />
+              <PublishForm
+                key={selected.timetable_id}
+                timetableId={selected.timetable_id}
+                onPublished={(res, from) => setPublished({ res, from })}
+              />
             </Card>
           )}
         </Stack>
