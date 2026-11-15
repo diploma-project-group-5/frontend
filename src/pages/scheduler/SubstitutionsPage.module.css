@@ -1,0 +1,251 @@
+/* «Заміни» — як у прототипі: вкладки «Нова відсутність» / «Пропозиції», групи за датами */
+
+.tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px;
+  margin-bottom: 14px;
+}
+.tabs button {
+  border: 0;
+  background: none;
+  padding: 6px 14px;
+  cursor: pointer;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 500;
+  border-radius: 999px;
+}
+.tabs button[aria-selected='true'] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--sh);
+}
+
+.narrow {
+  max-width: 820px;
+}
+.wide {
+  max-width: 980px;
+}
+
+.how {
+  margin-bottom: 14px;
+}
+.how summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.how ol {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  font-size: 13.5px;
+}
+
+.f2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 200px));
+  gap: 12px;
+}
+
+.seg {
+  display: inline-flex;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+.seg button {
+  border: 0;
+  background: none;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 500;
+}
+.seg button[aria-pressed='true'] {
+  background: var(--text);
+  color: var(--surface);
+}
+
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  border: 0;
+}
+.checks label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 11px;
+  cursor: pointer;
+  font-size: 13px;
+  background: var(--surface);
+}
+.checks label:has(input:checked) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+.checks input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.preview {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  font-size: 13.5px;
+}
+.preview li {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: var(--surface);
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.absence {
+  margin-bottom: 18px;
+}
+.absenceHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.absenceHead h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.sgroup {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.sgroup > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--surface2);
+  font-weight: 600;
+  flex-wrap: wrap;
+}
+.sgroup > header small {
+  font-weight: 400;
+}
+.headActs {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.err {
+  margin: 0;
+  color: var(--bad);
+  font-size: 0.9rem;
+}
+.sbody {
+  padding: 0 14px 12px;
+}
+.sbody > p {
+  margin: 10px 0 0;
+}
+
+.lrow {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+}
+.lrow small {
+  display: block;
+  margin-top: 2px;
+}
+.lrow .res {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.choice {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.choice label {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.choice label:has(input:checked) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.note {
+  font-size: 12.5px;
+  padding: 8px 14px 10px;
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 640px) {
+  .lrow {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .f2 {
+    grid-template-columns: 1fr;
+  }
+}

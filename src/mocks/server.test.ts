@@ -1,7 +1,8 @@
 import { schoolApi, tenantApi, timetableApi } from '@/api/endpoints';
 import { isApiError, type ApiError } from '@/api/http';
 import type { Day, TimetableDetail } from '@/api/types';
-import { minEffectiveFrom, todayKyiv } from '@/lib/time';
+import { schoolDatesBetween } from '@/lib/substitutions';
+import { addDaysIso, minEffectiveFrom, todayKyiv } from '@/lib/time';
 import { conflictErrors } from '@/test/contracts';
 import { startMockBackend } from '@/test/render';
 
@@ -141,5 +142,130 @@ describe('коди помилок і стани, як у сервісах', () =
     expect(job.state).toBe('done');
     const id = (job.result as { timetable_id: string }).timetable_id;
     expect((await timetableApi.get(id)).state).toBe('validated');
+  });
+});
+
+describe('відсутності й заміни (етап 2), як у timetable-service', () => {
+  /** Найближчі навчальні дати (без вихідних і канікул закладу) — тест не залежить від дня запуску. */
+  const firstSchoolDays = async () =>
+    schoolDatesBetween(
+      todayKyiv(),
+      addDaysIso(todayKyiv(), 60),
+      false,
+      await timetableApi.getHolidays(),
+    ).slice(0, 3);
+  /** Задачі substitution рахуються ~1,6 с: зсуваємо годинник і читаємо стан. */
+  async function settle() {
+    vi.setSystemTime(Date.now() + 5000);
+    await timetableApi.absences();
+  }
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    return () => vi.useRealTimers();
+  });
+
+  it('у демо є погоджена заміна й пропозиція', async () => {
+    await startMockBackend();
+    const list = await timetableApi.absences();
+    expect(list).toHaveLength(2);
+    const states = await Promise.all(
+      list.map(async (a) => {
+        const subs = await timetableApi.substitutions(a.jobs[0]!.date);
+        return subs.filter((x) => x.job_id === a.jobs[0]!.job_id)[0]?.state;
+      }),
+    );
+    expect(states).toEqual(['approved', 'proposed']);
+  });
+
+  it('POST /absences: 422 для минулої дати й періоду без уроків; 202 → по задачі на дату', async () => {
+    await startMockBackend();
+    const [d1, d2] = await firstSchoolDays();
+    await expect(
+      timetableApi.createAbsence({
+        teacher_id: 't1',
+        date_from: '2020-01-06',
+        date_to: '2020-01-06',
+      }),
+    ).rejects.toSatisfy((e) => isApiError(e, 'invalid_date'));
+    await expect(
+      timetableApi.createAbsence({
+        teacher_id: 't1',
+        date_from: d1!,
+        date_to: d1!,
+        lesson_nos: [9],
+      }),
+    ).rejects.toSatisfy((e) => isApiError(e, 'no_lessons'));
+
+    const res = await timetableApi.createAbsence({
+      teacher_id: 't2',
+      date_from: d1!,
+      date_to: d2!,
+    });
+    expect(res.job_ids).toHaveLength(2);
+    const a = (await timetableApi.absences()).find((x) => x.absence_id === res.absence_id)!;
+    expect(a.jobs.map((j) => j.state)).toEqual(['queued', 'queued']);
+    await settle();
+    const after = (await timetableApi.absences()).find((x) => x.absence_id === res.absence_id)!;
+    expect(after.jobs.map((j) => j.state)).toEqual(['done', 'done']);
+    const job = await timetableApi.getJob(res.job_ids[0]!);
+    expect((job.result as { proposals: unknown[] }).proposals.length).toBeGreaterThan(0);
+  });
+
+  it(':approve з cancel; повторне погодження — 409 job_not_ready; :reject; DELETE → rejected', async () => {
+    await startMockBackend();
+    const [, , d3] = await firstSchoolDays();
+    const res = await timetableApi.createAbsence({
+      teacher_id: 't3',
+      date_from: d3!,
+      date_to: d3!,
+    });
+    await settle();
+    const jobId = res.job_ids[0]!;
+    const rows = (await timetableApi.substitutions(d3!)).filter((x) => x.job_id === jobId);
+    expect(rows.every((r) => r.state === 'proposed')).toBe(true);
+    const self = rows.find((r) => r.kind === 'self_study');
+
+    const approved = await timetableApi.approveSubstitution(jobId, {
+      cancel: self ? [{ class_id: self.class_id, lesson_no: self.lesson_no }] : [],
+    });
+    expect(approved.every((r) => r.state === 'approved')).toBe(true);
+    if (self) expect(approved.find((r) => r.lesson_no === self.lesson_no)?.kind).toBe('cancelled');
+    await expect(timetableApi.approveSubstitution(jobId)).rejects.toSatisfy((e) =>
+      isApiError(e, 'job_not_ready'),
+    );
+
+    await timetableApi.deleteAbsence(res.absence_id);
+    const after = (await timetableApi.substitutions(d3!)).filter((x) => x.job_id === jobId);
+    expect(after.every((r) => r.state === 'rejected')).toBe(true);
+    expect((await timetableApi.absences()).some((a) => a.absence_id === res.absence_id)).toBe(
+      false,
+    );
+  });
+
+  it('нова версія з дати заміни: :publish повертає lost_substitutions, :approve — 409 stale', async () => {
+    await startMockBackend();
+    const from = minEffectiveFrom();
+    const res = await timetableApi.createAbsence({
+      teacher_id: 't4',
+      date_from: from,
+      date_to: from,
+    });
+    await settle();
+    const seeded = (await timetableApi.absences()).find((a) => a.teacher_id === 't5')!;
+    const seededJob = seeded.jobs[0]!;
+    // погоджена заміна з демо — раніше за нову версію, тож силу не втрачає
+    const draft = await timetableApi.copy((await published()).timetable_id);
+    const pub = await timetableApi.publish(draft.timetable_id, {
+      order_no: '50-о',
+      order_date: todayKyiv(),
+      approved_by: 'Директор',
+      effective_from: from,
+    });
+    expect(pub.warnings.lost_substitutions.every((x) => x.date >= from)).toBe(true);
+    expect(seededJob.date < from).toBe(true);
+
+    await expect(timetableApi.approveSubstitution(res.job_ids[0]!)).rejects.toSatisfy((e) =>
+      isApiError(e, 'stale'),
+    );
   });
 });
