@@ -29,6 +29,30 @@ export default defineConfig(({ mode }) => {
       globals: true,
       setupFiles: ['./src/test/setup.ts'],
       css: { modules: { classNameStrategy: 'non-scoped' } },
+      coverage: {
+        provider: 'v8',
+        include: ['src/**/*.{ts,tsx}'],
+        // Мок-бекенд не потрапляє в збірку (у нього свої тести контракту); keycloak.ts — тонка
+        // обгортка keycloak-js, її перевіряє вхід на стенді platform.
+        exclude: [
+          'src/**/*.test.{ts,tsx}',
+          'src/test/**',
+          'src/mocks/**',
+          'src/main.tsx',
+          'src/vite-env.d.ts',
+          'src/auth/keycloak.ts',
+        ],
+        reporter: ['text', 'text-summary'],
+        // Як у сервісах (vitest + coverage-v8): CI не пропустить нижче. Інтерфейс поки не дотягує
+        // до 90 % сервісів — пороги трохи нижчі за поточне покриття; чисті функції src/lib — строгіше.
+        thresholds: {
+          lines: 80,
+          statements: 80,
+          functions: 75,
+          branches: 70,
+          'src/lib/**': { lines: 95, statements: 95, functions: 90, branches: 90 },
+        },
+      },
     },
   };
 });

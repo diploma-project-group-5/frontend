@@ -72,4 +72,41 @@ describe('request', () => {
     expect(res.status).toBe(202);
     expect(res.data.job_id).toBe('j1');
   });
+
+  it('query-параметри: undefined пропускає, решту кодує', async () => {
+    const fetchMock = mockFetch(200, []);
+    await request('/school/audit', { query: { from: '2026-11-01', to: undefined, n: 3 } });
+    const url = new URL(String(fetchMock.mock.calls[0]![0]));
+    expect(url.pathname).toBe('/api/v1/school/audit');
+    expect(url.searchParams.get('from')).toBe('2026-11-01');
+    expect(url.searchParams.has('to')).toBe(false);
+    expect(url.searchParams.get('n')).toBe('3');
+  });
+
+  it('помилка не в JSON (напр. від шлюзу): текст іде в title, code немає', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Bad Gateway', { status: 502 })));
+    const err = (await request('/school/classes').catch((e: unknown) => e)) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(502);
+    expect(err.title).toBe('Bad Gateway');
+    expect(err.code).toBeUndefined();
+    expect(err.conflicts).toEqual([]);
+    expect(isApiError(err, 'stale')).toBe(false);
+  });
+
+  it('порожня відповідь (204) — data undefined, без помилки розбору', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
+    const res = await request('/school/teachers/t9', { method: 'DELETE' });
+    expect(res.status).toBe(204);
+    expect(res.data).toBeUndefined();
+  });
+
+  it('тіло запиту — JSON із Content-Type', async () => {
+    const fetchMock = mockFetch(200, {});
+    await request('/school/bells', { method: 'PUT', body: [{ lesson_no: 1 }] });
+    const init = fetchMock.mock.calls[0]![1] as RequestInit;
+    expect(init.body).toBe('[{"lesson_no":1}]');
+    expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+    expect(init.credentials).toBe('omit');
+  });
 });

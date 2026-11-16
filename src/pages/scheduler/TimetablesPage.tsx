@@ -525,7 +525,7 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
                   const f = formatOf(c.class_id, d);
                   return (
                     <tr key={c.class_id} className={f === 'remote' ? s.out : undefined}>
-                      <th className={s.cls}>
+                      <th scope="row" className={s.cls}>
                         <span>{c.name}</span>
                         {f && (
                           <button

@@ -1,8 +1,12 @@
+import fc from 'fast-check';
 import {
+  addDaysIso,
   formatDate,
   formatDayHeading,
   isoWeekKyiv,
+  isSchoolDay,
   minEffectiveFrom,
+  peakText,
   publishedPhase,
   todayKyiv,
 } from './time';
@@ -75,5 +79,56 @@ describe('форматування', () => {
   });
   it('formatDayHeading', () => {
     expect(formatDayHeading('2026-11-05')).toBe('четвер, 05.11');
+  });
+});
+
+describe('властивості (fast-check)', () => {
+  const moment = fc.date({
+    min: new Date('2024-01-01'),
+    max: new Date('2030-12-31'),
+    noInvalidDate: true,
+  });
+  const isoDate = fc.integer({ min: 0, max: 3000 }).map((n) => addDaysIso('2024-01-01', n));
+
+  it('minEffectiveFrom — навчальний день, не раніше ніж через N днів і не пізніше ніж за 2 дні після', () => {
+    fc.assert(
+      fc.property(moment, fc.integer({ min: 0, max: 14 }), fc.boolean(), (now, ahead, sat) => {
+        const earliest = addDaysIso(todayKyiv(now), ahead);
+        const d = minEffectiveFrom(now, ahead, sat);
+        expect(isSchoolDay(d, sat)).toBe(true);
+        expect(d >= earliest).toBe(true);
+        expect(d <= addDaysIso(earliest, 2)).toBe(true);
+      }),
+    );
+  });
+
+  it('addDaysIso: +n і −n повертають ту саму дату (і через перехід на літній час)', () => {
+    fc.assert(
+      fc.property(isoDate, fc.integer({ min: -400, max: 400 }), (d, n) => {
+        expect(addDaysIso(addDaysIso(d, n), -n)).toBe(d);
+      }),
+    );
+  });
+
+  it('publishedPhase: серед версій, що вже набули чинності, рівно одна чинна', () => {
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(isoDate, { minLength: 1, maxLength: 8 }),
+        isoDate,
+        (all, today) => {
+          const phases = all.map((d) => publishedPhase(d, all, today));
+          const past = all.filter((d) => d <= today);
+          expect(phases.filter((p) => p === 'current')).toHaveLength(past.length ? 1 : 0);
+          all.forEach((d, i) => expect(phases[i] === 'scheduled').toBe(d > today));
+        },
+      ),
+    );
+  });
+});
+
+describe('peakText', () => {
+  it('пік за паспортом або «—», якщо сервер дав null', () => {
+    expect(peakText({ day: 3, load: 150, limit: 160 })).toBe('150 / 160 (Ср)');
+    expect(peakText(null)).toBe('—');
   });
 });
