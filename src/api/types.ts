@@ -379,6 +379,40 @@ export interface Absence {
   jobs: { job_id: Uuid; date: IsoDate; state: JobState }[];
 }
 
+// ───────────── заміни (етап 2) ─────────────
+
+/**
+ * teacher — новий вчитель; moved — урок перенесено (moved_to); self_study — самостійна робота;
+ * cancelled — укладач обрав «скасовано» замість самостійної роботи під час погодження.
+ */
+export type SubstitutionKind = 'teacher' | 'moved' | 'self_study' | 'cancelled';
+export type SubstitutionState = 'proposed' | 'approved' | 'rejected';
+
+/** Накладка на урок (GET /substitutions?date=, відповідь :approve / :reject). */
+export interface Substitution {
+  job_id: Uuid;
+  date: IsoDate;
+  class_id: Uuid;
+  lesson_no: number;
+  /** версія, від якої пораховано заміну; якщо на дату діє інша — заміна втратила силу */
+  timetable_id: Uuid;
+  subject_id: Uuid;
+  original_teacher_id: Uuid;
+  kind: SubstitutionKind;
+  new_teacher_id: Uuid | null;
+  /** новий вчитель не веде цей предмет («не за фахом») */
+  off_profile: boolean;
+  moved_to: { date: IsoDate; lesson_no: number } | null;
+  /** крок пошуку solver: 1 — вільний вчитель, 2 — перебудова дня, 3 — сусідні дні */
+  step: number | null;
+  state: SubstitutionState;
+}
+
+export interface ApproveSubstitutionRequest {
+  /** самостійна робота → «скасовано» для цих уроків */
+  cancel?: { class_id: Uuid; lesson_no: number }[];
+}
+
 // ───────────── QR ─────────────
 
 export type TokenScope = 'class' | 'teacher';
