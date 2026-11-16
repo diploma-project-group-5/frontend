@@ -1,6 +1,7 @@
-import { screen, within } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import { timetableApi } from '@/api/endpoints';
-import { minEffectiveFrom, todayKyiv } from '@/lib/time';
+import { schoolDatesBetween } from '@/lib/substitutions';
+import { addDaysIso, minEffectiveFrom, todayKyiv } from '@/lib/time';
 import { renderPage, startMockBackend } from '@/test/render';
 import { SubstitutionsPage } from './SubstitutionsPage';
 
@@ -135,5 +136,98 @@ describe('Заміни', () => {
     const stale = await group('Кравець А. Р.');
     await user.click(await stale.findByRole('button', { name: /Погодити/ }));
     expect(await stale.findByText(/На цю дату вже діє інша версія розкладу/)).toBeInTheDocument();
+  });
+
+  it('solver без рушія замін: failed + unsupported_job_type — зрозумілий текст (frontend #7)', async () => {
+    await startMockBackend();
+    const mockFetch = globalThis.fetch;
+    const absence = {
+      absence_id: 'a-x',
+      teacher_id: 't2',
+      date_from: todayKyiv(),
+      date_to: todayKyiv(),
+      lesson_nos: null,
+      created_at: new Date().toISOString(),
+      jobs: [{ job_id: 'j-x', date: todayKyiv(), state: 'failed' }],
+    };
+    const job = {
+      job_id: 'j-x',
+      kind: 'substitution',
+      state: 'failed',
+      snapshot_version: 1,
+      created_at: absence.created_at,
+      started_at: null,
+      error: 'unsupported_job_type',
+    };
+    // поверх мок-бекенду: стан, який дає solver 0.3 (до рушія замін)
+    globalThis.fetch = async (input, init) => {
+      const path = new URL(String(input), window.location.origin).pathname;
+      if (path === '/api/v1/timetable/absences') return Response.json([absence]);
+      if (path === '/api/v1/timetable/jobs/j-x') return Response.json(job);
+      return mockFetch(input, init);
+    };
+    onTestFinished(() => {
+      globalThis.fetch = mockFetch;
+    });
+
+    renderPage(<SubstitutionsPage />, { path: '/scheduler/substitutions' });
+    const g = await group('Коваль Н. В.');
+    expect(await g.findByRole('status', {}, { timeout: 2000 })).toHaveTextContent(
+      'Автоматичний підбір замін з’явиться на етапі 2. Поки що призначте заміну вручну.',
+    );
+    expect(g.queryByText(/unsupported_job_type/)).not.toBeInTheDocument();
+  });
+
+  it('409 teacher_is_substitute: відсутність замінника, уже погодженого на ці уроки', async () => {
+    await startMockBackend();
+    // у демо погоджена заміна Бондаря: беремо її нового вчителя й дату
+    const seeded = (await timetableApi.absences()).find((a) => a.teacher_id === 't5')!;
+    const date = seeded.jobs[0]!.date;
+    const row = (await timetableApi.substitutions(date)).find((r) => r.new_teacher_id)!;
+
+    const { user } = renderPage(<SubstitutionsPage />, {
+      path: '/scheduler/substitutions',
+      url: '/scheduler/substitutions?tab=new',
+    });
+    await user.selectOptions(await screen.findByLabelText('Хто відсутній'), row.new_teacher_id!);
+    fireEvent.change(screen.getByLabelText('З'), { target: { value: date } });
+    fireEvent.change(screen.getByLabelText('По'), { target: { value: date } });
+    await user.click(screen.getByRole('button', { name: 'Внести відсутність' }));
+    expect(
+      await screen.findByText(/Цей вчитель уже погоджений замінником у ці дні й уроки/),
+    ).toBeInTheDocument();
+  });
+
+  it('409 date_passed: пропозицію на минулу дату не погодити', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    await startMockBackend();
+    const [d1, d2] = schoolDatesBetween(
+      todayKyiv(),
+      addDaysIso(todayKyiv(), 60),
+      false,
+      await timetableApi.getHolidays(),
+    );
+    // дві дати: коли перша мине, відсутність ще в списку (date_to ≥ сьогодні)
+    await timetableApi.createAbsence({ teacher_id: 't8', date_from: d1!, date_to: d2! });
+    vi.setSystemTime(new Date(`${d2}T10:00:00Z`));
+
+    const { user } = renderPage(<SubstitutionsPage />, {
+      path: '/scheduler/substitutions',
+      url: '/scheduler/substitutions?tab=props',
+    });
+    const g = await group('Олійник В. Д.'); // перша група — перша (уже минула) дата
+    await user.click(await g.findByRole('button', { name: /Погодити/ }));
+    expect(await g.findByText(/Дата заміни вже минула/)).toBeInTheDocument();
+  });
+
+  it('мітки пропозиції: «інший вчитель», «не за фахом», «самостійна»', async () => {
+    await setup();
+    const g = await group('Ткаченко Г. О.');
+    await g.findByText('пропозиція');
+    expect(g.getAllByText('інший вчитель').length).toBeGreaterThan(0);
+    expect(g.queryByText('предметник')).not.toBeInTheDocument();
   });
 });

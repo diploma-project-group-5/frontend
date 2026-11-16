@@ -174,7 +174,8 @@ function BuildAlert() {
     mutationFn: timetableApi.alertBuild,
     onSuccess: (r) => setJobId(r.job_id),
   });
-  const running = !!jobId && !isTerminal(job.data);
+  // помилка опитування — не «побудова триває»: інакше кнопка заблокована назавжди
+  const running = !!jobId && !job.error && !isTerminal(job.data);
   const done = job.data?.state === 'done';
   useEffect(() => {
     if (done) invalidate(); // план став draft — оновлюємо картку
@@ -189,6 +190,14 @@ function BuildAlert() {
         <Notice tone="bad">
           <p>{JOB_STATE_LABEL[job.data.state]}</p>
         </Notice>
+      )}
+      {job.error && (
+        <>
+          <ProblemNotice error={job.error} />
+          <Button size="sm" onClick={() => void job.refetch()}>
+            Оновити стан
+          </Button>
+        </>
       )}
       {build.error && <ProblemNotice error={build.error} />}
     </div>

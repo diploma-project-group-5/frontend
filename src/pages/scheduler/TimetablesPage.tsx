@@ -6,6 +6,7 @@ import { isApiError } from '@/api/http';
 import type { Day, Lesson, TimetableLoad, TimetableSummary } from '@/api/types';
 import { isTerminal, JOB_STATE_LABEL, useJob } from '@/api/useJob';
 import { conflictNames, describeConflict, useConflictNames } from '@/lib/conflicts';
+import { reasonText } from '@/lib/reasons';
 import { DAY_SHORT, formatDate, peakText, publishedPhase, todayKyiv } from '@/lib/time';
 import { Badge, Button, Chip, Notice, PageHeader, ProblemNotice, Spinner } from '@/ui';
 import { IconOk, IconRefresh, IconWarn } from '@/ui/icons';
@@ -174,7 +175,17 @@ function JobStatus({
         </Notice>
       );
     }
-    return <ProblemNotice error={job.error} />;
+    return (
+      <>
+        <ProblemNotice error={job.error} />
+        <p>
+          <Button size="sm" onClick={() => void job.refetch()}>
+            Оновити стан
+          </Button>{' '}
+          <button onClick={onDismiss}>Закрити</button>
+        </p>
+      </>
+    );
   }
   const j = job.data;
   if (!isTerminal(j)) {
@@ -661,8 +672,9 @@ function reasonStatus(
   load: TimetableLoad | undefined,
 ): Status {
   const r = load?.class_days.find((x) => x.class_id === classId && x.day === day);
+  const why = r ? `: ${reasonText(format, r.reason)}` : '';
   return {
     tone: 'info',
-    text: `${name}, ${DAY_FULL[day]}: ${format === 'remote' ? 'дистанційно' : 'очно'}.${r ? ` ${r.reason}.` : ''}`,
+    text: `${name}, ${DAY_FULL[day]}: ${format === 'remote' ? 'дистанційно' : 'очно'}${why}.`,
   };
 }

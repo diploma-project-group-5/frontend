@@ -26,4 +26,30 @@ describe('аркуші QR для друку', () => {
     await user.click(screen.getByRole('button', { name: 'Друкувати' }));
     expect(print).toHaveBeenCalled();
   });
+
+  it('класи йдуть за номером: 1-А, 2-А, 10-А, 11-А (а не як рядки)', async () => {
+    await startMockBackend();
+    const mockFetch = globalThis.fetch;
+    const token = (label: string) => ({
+      token_id: label,
+      scope: 'class',
+      target_id: label,
+      target_label: label,
+      generation: 1,
+      url: `https://lad.example/c#${label}`,
+    });
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(String(input), window.location.origin);
+      if (url.pathname === '/api/v1/timetable/access-tokens')
+        return Response.json(['10-А', '1-А', '11-А', '2-А'].map(token));
+      return mockFetch(input, init);
+    };
+    onTestFinished(() => {
+      globalThis.fetch = mockFetch;
+    });
+    renderPage(<QrSheetPage />, { path: '/print/qr/:scope', url: '/print/qr/class' });
+    await screen.findByText('10-А');
+    const order = [...document.querySelectorAll('figcaption b')].map((b) => b.textContent);
+    expect(order).toEqual(['1-А', '2-А', '10-А', '11-А']);
+  });
 });

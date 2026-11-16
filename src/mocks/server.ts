@@ -305,6 +305,17 @@ function createAbsence(body: {
   const t = d.teachers.find((x) => x.teacher_id === body.teacher_id && !x.deleted_at);
   if (!t) return problem(422, 'teacher_not_found', 'Вчителя не знайдено');
   const lessonNos = body.lesson_nos?.length ? [...new Set(body.lesson_nos)].sort() : null;
+  // timetable #6: вчитель сам погоджений замінник у ці дні й уроки
+  const substitute = subs.some(
+    (x) =>
+      x.state === 'approved' &&
+      x.new_teacher_id === t.teacher_id &&
+      x.date >= body.date_from &&
+      x.date <= body.date_to &&
+      (lessonNos === null || lessonNos.includes(x.lesson_no)),
+  );
+  if (substitute)
+    return problem(409, 'teacher_is_substitute', 'Вчитель уже погоджений замінником у ці години');
 
   const planned = schoolDates(body.date_from, body.date_to).flatMap((date) => {
     const tt = versionAt(date);
@@ -376,6 +387,7 @@ function approveSubstitution(jobId: string, cancel: { class_id: string; lesson_n
   if (view.state !== 'done' || !own.length)
     return problem(409, 'job_not_ready', 'Немає пропозицій для погодження');
   const date = j.date!;
+  if (date < todayKyiv()) return problem(409, 'date_passed', 'Дата заміни вже минула');
   if (versionAt(date)?.timetable_id !== own[0]!.timetable_id)
     return problem(409, 'stale', 'На дату діє інший розклад', {
       detail: 'Внесіть відсутність знову',

@@ -219,6 +219,11 @@ export interface Job {
   started_at: IsoDateTime | null;
   conflicts?: Conflict[];
   result?: { timetable_id: Uuid } | { alert_plan: true } | { proposals: unknown[] };
+  /**
+   * Код збою для failed / rejected (contracts 0.4.0), напр. `unsupported_job_type` — solver
+   * без рушія замін одразу відповідає на задачу substitution відмовою.
+   */
+  error?: string | null;
 }
 
 // ───────────── timetable: версії ─────────────
@@ -271,6 +276,10 @@ export interface LimitUsage {
   ok?: boolean;
 }
 
+/** Причина формату класо-дня (validator-lib 0.3+, contracts 0.4.1). */
+export type LoadReason =
+  'priority' | 'capacity_available' | 'day_limit' | 'no_shelter' | 'no_lessons';
+
 export interface LoadPeak {
   condition: 'seats' | 'passport';
   day: Day;
@@ -294,7 +303,8 @@ export interface TimetableLoad {
     day: Day;
     format: DayFormat;
     lessons?: number;
-    reason: string; // ліміт дня, пріоритет, «не в укритті»
+    /** чому такий формат (contracts 0.4.1); тексти — src/lib/reasons.ts */
+    reason: LoadReason | (string & {});
   }[];
   summary: {
     remote_class_days: number;

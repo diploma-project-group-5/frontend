@@ -278,12 +278,13 @@ export function makeLoad(tt: TimetableDetail): TimetableLoad {
       return {
         ...f,
         lessons: tt.lessons.filter((l) => l.class_id === f.class_id && l.day === f.day).length,
+        // коди, як у validator-lib (contracts 0.4.1)
         reason:
           f.format === 'remote'
-            ? 'Ліміт укриття на цей день вичерпано'
+            ? ('day_limit' as const)
             : c.in_person_priority
-              ? 'Клас має пріоритет очного навчання'
-              : 'Місць в укритті вистачає',
+              ? ('priority' as const)
+              : ('capacity_available' as const),
       };
     }),
     summary: {

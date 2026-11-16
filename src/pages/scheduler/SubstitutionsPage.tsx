@@ -387,7 +387,16 @@ function NewAbsence({ onCreated }: { onCreated: (res: AbsenceAccepted) => void }
                 {error}
               </p>
             )}
-            {create.error && <ProblemNotice error={create.error} />}
+            {isApiError(create.error, 'teacher_is_substitute') ? (
+              <Notice tone="bad">
+                <p>
+                  Цей вчитель уже погоджений замінником у ці дні й уроки. Спершу відхиліть ту заміну
+                  або скасуйте відсутність, для якої його призначено.
+                </p>
+              </Notice>
+            ) : (
+              create.error && <ProblemNotice error={create.error} />
+            )}
 
             <div className={s.foot}>
               <span className="muted">
@@ -512,6 +521,13 @@ function JobGroup({ job, ctx }: { job: Absence['jobs'][number]; ctx: Ctx }) {
     .filter((r) => r.job_id === job.job_id)
     .sort((a, b) => a.lesson_no - b.lesson_no);
   const [cancelled, setCancelled] = useState<Set<string>>(new Set());
+  // для збою — код з GET /jobs/{id} (поле error), щоб пояснити його людськими словами
+  const failed = !done && isTerminal(job);
+  const details = useQuery({
+    queryKey: ['job', job.job_id],
+    queryFn: () => timetableApi.getJob(job.job_id),
+    enabled: failed,
+  });
 
   const settle = (next: Substitution[]) => {
     qc.setQueryData<Substitution[]>(['substitutions', job.date], (old) => [
@@ -560,13 +576,21 @@ function JobGroup({ job, ctx }: { job: Absence['jobs'][number]; ctx: Ctx }) {
 
       {!done ? (
         <div className={s.sbody}>
-          {isTerminal(job) ? (
-            <p>
-              Пропозицій немає: задача завершилась зі станом «{JOB_STATE_LABEL[job.state]}».
-              Скасуйте відсутність і внесіть її знову пізніше.
-            </p>
+          {failed ? (
+            details.data?.error === 'unsupported_job_type' ? (
+              <p role="status">
+                Автоматичний підбір замін з’явиться на етапі 2. Поки що призначте заміну вручну.
+              </p>
+            ) : (
+              <p role="status">
+                Пропозицій немає: задача завершилась зі станом «{JOB_STATE_LABEL[job.state]}».
+                Скасуйте відсутність і внесіть її знову пізніше.
+              </p>
+            )
           ) : (
-            <p className="muted">Solver рахує пропозиції… ({JOB_STATE_LABEL[job.state]})</p>
+            <p className="muted" role="status">
+              Solver рахує пропозиції… ({JOB_STATE_LABEL[job.state]})
+            </p>
           )}
         </div>
       ) : subs.isPending ? (
@@ -660,8 +684,9 @@ function SubstitutionRow({
   if (r.kind === 'teacher') {
     res = (
       <>
+        <Chip tone="acc">інший вчитель</Chip>
         <b>{label(names, 'teachers', r.new_teacher_id)}</b>
-        {r.off_profile ? <Chip tone="warn">не за фахом</Chip> : <Chip tone="ok">предметник</Chip>}
+        {r.off_profile && <Chip tone="warn">не за фахом</Chip>}
       </>
     );
   } else if (r.kind === 'moved' && r.moved_to) {
@@ -678,24 +703,44 @@ function SubstitutionRow({
     );
   } else if (r.kind === 'self_study' && r.state === 'proposed') {
     res = (
-      <span className={s.choice} role="radiogroup" aria-label={`${r.lesson_no} урок: як провести`}>
-        <label>
-          <input
-            type="radio"
-            name={name}
-            checked={!cancelled}
-            onChange={() => onCancelled(false)}
-          />
-          самостійна робота
-        </label>
-        <label>
-          <input type="radio" name={name} checked={cancelled} onChange={() => onCancelled(true)} />
-          скасовано
-        </label>
-      </span>
+      <>
+        <Chip>самостійна</Chip>
+        <span
+          className={s.choice}
+          role="radiogroup"
+          aria-label={`${r.lesson_no} урок: як провести`}
+        >
+          <label>
+            <input
+              type="radio"
+              name={name}
+              checked={!cancelled}
+              onChange={() => onCancelled(false)}
+            />
+            самостійна робота
+          </label>
+          <label>
+            <input
+              type="radio"
+              name={name}
+              checked={cancelled}
+              onChange={() => onCancelled(true)}
+            />
+            скасовано
+          </label>
+        </span>
+      </>
     );
   } else {
-    res = <b>{r.kind === 'cancelled' ? 'скасовано' : 'самостійна робота'}</b>;
+    res =
+      r.kind === 'cancelled' ? (
+        <Chip tone="bad">скасовано</Chip>
+      ) : (
+        <>
+          <Chip>самостійна</Chip>
+          <b>самостійна робота</b>
+        </>
+      );
   }
 
   return (
@@ -732,6 +777,12 @@ function DecisionError({ error }: { error: unknown }) {
     return (
       <Notice tone="bad">
         <p>Один із уроків уже має погоджену заміну. Відхиліть цю пропозицію.</p>
+      </Notice>
+    );
+  if (isApiError(error, 'date_passed'))
+    return (
+      <Notice tone="bad">
+        <p>Дата заміни вже минула — погодити її не можна. Відхиліть пропозицію.</p>
       </Notice>
     );
   if (isApiError(error, 'job_not_ready'))

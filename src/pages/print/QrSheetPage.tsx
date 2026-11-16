@@ -3,6 +3,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useParams } from 'react-router';
 import { schoolApi, timetableApi } from '@/api/endpoints';
 import type { TokenScope } from '@/api/types';
+import { sortByLabel } from '@/lib/sort';
 import { Button, ProblemNotice, Spinner } from '@/ui';
 import s from './QrSheetPage.module.css';
 
@@ -26,6 +27,8 @@ export function QrSheetPage() {
   if (tokens.error) return <ProblemNotice error={tokens.error} />;
 
   const school = profile.data?.name ?? '';
+  // класи за номером (1-А, 2-А … 10-А), вчителі — за абеткою
+  const list = sortByLabel(tokens.data, (t) => t.target_label);
 
   return (
     <div className={s.sheet}>
@@ -37,7 +40,7 @@ export function QrSheetPage() {
 
       {scope === 'class' ? (
         <div className={s.classGrid}>
-          {tokens.data.map((t) => (
+          {list.map((t) => (
             <figure key={t.token_id} className={s.card}>
               <QRCodeSVG value={t.url} size={160} level="M" marginSize={2} />
               <figcaption>
@@ -52,7 +55,7 @@ export function QrSheetPage() {
           </p>
         </div>
       ) : (
-        tokens.data.map((t) => (
+        list.map((t) => (
           <section key={t.token_id} className={s.teacherPage}>
             <h1>{t.target_label}</h1>
             <p>Ваш персональний розклад за класами — на поточний і наступний тиждень.</p>
