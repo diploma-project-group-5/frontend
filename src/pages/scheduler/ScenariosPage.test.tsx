@@ -30,4 +30,29 @@ describe('Сценарії: розклад тривог', () => {
     await user.click(screen.getByRole('button', { name: 'Внести' }));
     expect(await screen.findByTitle(`${formatDate(todayKyiv())}: 300 хв`)).toBeInTheDocument();
   });
+
+  it('GET /jobs/{id} упав — кнопку побудови знову можна натиснути, є «Оновити стан»', async () => {
+    await startMockBackend();
+    const mockFetch = globalThis.fetch;
+    let jobCalls = 0;
+    globalThis.fetch = async (input, init) => {
+      const path = new URL(String(input), window.location.origin).pathname;
+      if (path.startsWith('/api/v1/timetable/jobs/')) {
+        jobCalls++;
+        return Response.json({ status: 503, title: 'Service Unavailable' }, { status: 503 });
+      }
+      return mockFetch(input, init);
+    };
+    onTestFinished(() => {
+      globalThis.fetch = mockFetch;
+    });
+    const { user } = renderPage(<ScenariosPage />);
+    const build = await screen.findByRole('button', { name: /Побудувати план тривог/ });
+    await user.click(build);
+    expect(await screen.findByRole('button', { name: 'Оновити стан' })).toBeInTheDocument();
+    expect(build).toBeEnabled();
+    const calls = jobCalls;
+    await new Promise((r) => setTimeout(r, 1700)); // довше за інтервал опитування
+    expect(jobCalls).toBe(calls); // після помилки не опитуємо
+  });
 });

@@ -11,10 +11,12 @@ import type {
   PublicDay,
   PublicTimetable,
   PublishRequest,
+  Substitution,
   TimetableDetail,
 } from '@/api/types';
 import { formatDate, minEffectiveFrom, todayKyiv } from '@/lib/time';
 import * as d from './data';
+import * as sub from './substitutions';
 
 /**
  * Мок-бекенд для `npm run dev:mock`: підміняє window.fetch для /api/v1/*.
@@ -31,8 +33,12 @@ const versions = new Map<string, TimetableDetail>();
 type MockJob = {
   createdAt: number;
   seed: number;
-  kind: 'build_main' | 'build_alert';
+  kind: 'build_main' | 'build_alert' | 'substitution';
   timetableId?: string;
+  /** substitution: відсутність, дата й шаблон, від якого рахуємо */
+  absenceId?: string;
+  date?: string;
+  computed?: boolean;
 };
 const jobs = new Map<string, MockJob>();
 let seq = 0;
@@ -70,6 +76,30 @@ const alertPlan: AlertPlan = {
   order: { order_no: '112-о', order_date: '2026-09-28', approved_by: 'Савченко Л. М., директор' },
   activations: [],
 };
+
+/** Що діє на дату (як resolveScheduleAt у timetable-service): активація тривог або чинна main. */
+function versionAt(date: string): TimetableDetail | undefined {
+  const act = alertPlan.activations.find((a) => a.from <= date && (!a.to || a.to > date));
+  if (act && alertPlan.timetable_id) return versions.get(alertPlan.timetable_id);
+  return [...versions.values()]
+    .filter((v) => v.kind === 'main' && v.state === 'published' && v.effective_from! <= date)
+    .sort((a, b) => a.effective_from!.localeCompare(b.effective_from!))
+    .at(-1);
+}
+
+// ── відсутності й заміни (етап 2) ──
+type MockAbsence = {
+  absence_id: string;
+  teacher_id: string;
+  date_from: string;
+  date_to: string;
+  lesson_nos: number[] | null;
+  created_at: string;
+  cancelled: boolean;
+};
+const absences: MockAbsence[] = [];
+const subs: Substitution[] = [];
+const MAX_ABSENCE_DAYS = 31;
 
 const alertLocked = () => alertPlan.activations.some((a) => !a.to || a.to > todayKyiv());
 
@@ -137,7 +167,8 @@ function activeBuild(kind?: MockJob['kind']) {
   return [...jobs.keys()].find((id) => {
     const j = jobs.get(id)!;
     const s = jobView(id)?.state;
-    return (!kind || j.kind === kind) && (s === 'queued' || s === 'running');
+    const matches = kind ? j.kind === kind : j.kind !== 'substitution';
+    return matches && (s === 'queued' || s === 'running');
   });
 }
 
@@ -170,6 +201,7 @@ function jobView(id: string): Job | undefined {
   const j = jobs.get(id);
   if (!j) return undefined;
   const age = Date.now() - j.createdAt;
+  if (j.kind === 'substitution') return substitutionJobView(id, j, age);
   const base = {
     job_id: id,
     kind: j.kind,
@@ -198,6 +230,208 @@ function jobView(id: string): Job | undefined {
   return { ...base, state: 'done', result: { timetable_id: j.timetableId } };
 }
 
+/** Задача substitution: queued → running → done приблизно за 1,6 с; пропозиції — при першому done. */
+function substitutionJobView(id: string, j: MockJob, age: number): Job {
+  const base = {
+    job_id: id,
+    kind: j.kind,
+    snapshot_version: d.profile.snapshot_version,
+    created_at: new Date(j.createdAt).toISOString(),
+    started_at: age > 600 ? new Date(j.createdAt + 600).toISOString() : null,
+  };
+  if (age < 600) return { ...base, state: 'queued' };
+  if (age < 1600) return { ...base, state: 'running' };
+  if (!j.computed) {
+    j.computed = true;
+    const a = absences.find((x) => x.absence_id === j.absenceId)!;
+    const tt = versions.get(j.timetableId!)!;
+    const date = j.date!;
+    const lessons = sub.lessonsToCover(tt, date, a.teacher_id, a.lesson_nos);
+    const taken = subs.filter((x) => x.date === date && x.state !== 'rejected');
+    const { step, proposals } = sub.propose({
+      tt,
+      date,
+      absentId: a.teacher_id,
+      lessons,
+      teachers: d.teachers,
+      plan: d.plan,
+      busy: (t, n) => taken.some((x) => x.new_teacher_id === t && x.lesson_no === n),
+    });
+    subs.push(
+      ...proposals.map((p) => ({
+        ...p,
+        job_id: id,
+        date,
+        timetable_id: tt.timetable_id,
+        step,
+        state: a.cancelled ? ('rejected' as const) : ('proposed' as const),
+      })),
+    );
+  }
+  return { ...base, state: 'done', result: { proposals: subs.filter((x) => x.job_id === id) } };
+}
+
+/** Навчальні дати періоду (пн–пт, субота — якщо в профілі), без канікул. */
+function schoolDates(from: string, to: string): string[] {
+  const out: string[] = [];
+  const { holiday_from: hf, holiday_to: ht } = holidays;
+  for (let x = from; x <= to; x = addDaysIsoLocal(x, 1)) {
+    const wd = sub.isoWeekday(x);
+    if (hf && ht && x >= hf && x <= ht) continue;
+    if (wd <= 5 || (wd === 6 && d.profile.saturday)) out.push(x);
+  }
+  return out;
+}
+
+function createAbsence(body: {
+  teacher_id: string;
+  date_from: string;
+  date_to: string;
+  lesson_nos?: number[] | null;
+}): Response {
+  const today = todayKyiv();
+  if (body.date_from < today)
+    return problem(422, 'invalid_date', 'Дата в минулому', {
+      detail: 'Відсутність вносять з сьогодні або пізніше',
+    });
+  if (body.date_to < body.date_from)
+    return problem(422, 'invalid_date', 'Некоректний період', {
+      detail: 'date_to раніше за date_from',
+    });
+  if (schoolDates(body.date_from, body.date_to).length > MAX_ABSENCE_DAYS)
+    return problem(422, 'invalid_date', 'Задовгий період', {
+      detail: `Не більше ${MAX_ABSENCE_DAYS} днів`,
+    });
+  const t = d.teachers.find((x) => x.teacher_id === body.teacher_id && !x.deleted_at);
+  if (!t) return problem(422, 'teacher_not_found', 'Вчителя не знайдено');
+  const lessonNos = body.lesson_nos?.length ? [...new Set(body.lesson_nos)].sort() : null;
+  // timetable #6: вчитель сам погоджений замінник у ці дні й уроки
+  const substitute = subs.some(
+    (x) =>
+      x.state === 'approved' &&
+      x.new_teacher_id === t.teacher_id &&
+      x.date >= body.date_from &&
+      x.date <= body.date_to &&
+      (lessonNos === null || lessonNos.includes(x.lesson_no)),
+  );
+  if (substitute)
+    return problem(409, 'teacher_is_substitute', 'Вчитель уже погоджений замінником у ці години');
+
+  const planned = schoolDates(body.date_from, body.date_to).flatMap((date) => {
+    const tt = versionAt(date);
+    if (!tt) return [];
+    return sub.lessonsToCover(tt, date, t.teacher_id, lessonNos).length ? [{ date, tt }] : [];
+  });
+  if (!planned.length)
+    return problem(422, 'no_lessons', 'Немає уроків для заміни', {
+      detail: 'У цей період вчитель не має уроків в опублікованому розкладі',
+    });
+
+  const a: MockAbsence = {
+    absence_id: crypto.randomUUID(),
+    teacher_id: t.teacher_id,
+    date_from: body.date_from,
+    date_to: body.date_to,
+    lesson_nos: lessonNos,
+    created_at: new Date().toISOString(),
+    cancelled: false,
+  };
+  absences.push(a);
+  const job_ids = planned.map(({ date, tt }) => {
+    const id = crypto.randomUUID();
+    jobs.set(id, {
+      createdAt: Date.now(),
+      seed: ++seq,
+      kind: 'substitution',
+      absenceId: a.absence_id,
+      date,
+      timetableId: tt.timetable_id,
+    });
+    return id;
+  });
+  audit('Внесено відсутність', `Вчитель #${t.teacher_no}`, {
+    дати: `${formatDate(a.date_from)}–${formatDate(a.date_to)}`,
+    задач: job_ids.length,
+  });
+  return json(202, { absence_id: a.absence_id, job_ids });
+}
+
+function absenceView(a: MockAbsence) {
+  const own = [...jobs.entries()].filter(([, j]) => j.absenceId === a.absence_id);
+  return {
+    absence_id: a.absence_id,
+    teacher_id: a.teacher_id,
+    date_from: a.date_from,
+    date_to: a.date_to,
+    lesson_nos: a.lesson_nos,
+    created_at: a.created_at,
+    jobs: own
+      .map(([id, j]) => ({ job_id: id, date: j.date!, state: jobView(id)!.state }))
+      .sort((x, y) => x.date.localeCompare(y.date)),
+  };
+}
+
+/** Погоджені заміни з дати, коли почне діяти інша версія, — втрачають силу. */
+function lostFrom(from: string, timetableId: string) {
+  return subs
+    .filter((x) => x.state === 'approved' && x.date >= from && x.timetable_id !== timetableId)
+    .map(({ date, class_id, lesson_no }) => ({ date, class_id, lesson_no }));
+}
+
+function approveSubstitution(jobId: string, cancel: { class_id: string; lesson_no: number }[]) {
+  const j = jobs.get(jobId);
+  if (!j || j.kind !== 'substitution')
+    return problem(404, 'not_found', 'Задачу заміни не знайдено');
+  const view = jobView(jobId)!;
+  const own = subs.filter((x) => x.job_id === jobId && x.state === 'proposed');
+  if (view.state !== 'done' || !own.length)
+    return problem(409, 'job_not_ready', 'Немає пропозицій для погодження');
+  const date = j.date!;
+  if (date < todayKyiv()) return problem(409, 'date_passed', 'Дата заміни вже минула');
+  if (versionAt(date)?.timetable_id !== own[0]!.timetable_id)
+    return problem(409, 'stale', 'На дату діє інший розклад', {
+      detail: 'Внесіть відсутність знову',
+    });
+  const approved = subs.filter((x) => x.date === date && x.state === 'approved');
+  if (
+    own.some((p) => approved.some((x) => x.class_id === p.class_id && x.lesson_no === p.lesson_no))
+  )
+    return problem(409, 'slot_taken', 'Слот уже має погоджену заміну');
+  const clash = own.find(
+    (p) =>
+      p.new_teacher_id &&
+      approved.some((x) => x.new_teacher_id === p.new_teacher_id && x.lesson_no === p.lesson_no),
+  );
+  if (clash)
+    return problem(409, 'conflicts', 'Заміна створює накладку', {
+      conflicts: [
+        {
+          rule: 'teacher_double_booked',
+          teacher_id: clash.new_teacher_id!,
+          day: sub.isoWeekday(date),
+          lesson_no: clash.lesson_no,
+        },
+      ] satisfies Conflict[],
+    });
+  for (const p of own) {
+    if (
+      p.kind === 'self_study' &&
+      cancel.some((c) => c.class_id === p.class_id && c.lesson_no === p.lesson_no)
+    )
+      p.kind = 'cancelled';
+    p.state = 'approved';
+  }
+  const t = d.teachers.find((x) => x.teacher_id === own[0]!.original_teacher_id);
+  audit('Погоджено заміну', t ? `Вчитель #${t.teacher_no}` : null, {
+    дата: formatDate(date),
+    уроків: own.length,
+  });
+  return json(
+    200,
+    subs.filter((x) => x.job_id === jobId),
+  );
+}
+
 function publicTimetable(scope: 'class' | 'teacher'): PublicTimetable {
   const today = todayKyiv();
   const monday = startOfISOWeek(parseISO(today));
@@ -215,12 +449,20 @@ function publicTimetable(scope: 'class' | 'teacher'): PublicTimetable {
           return { date, format: null, lessons: [], holiday: true, holiday_from, holiday_to };
       }
       const fmt = current.day_formats.find((f) => f.class_id === cls.class_id && f.day === day)!;
+      // погоджені заміни на дату (від версії, що діє): «Заміна» в класу, «скасовано» — без уроку
+      const daySubs = subs.filter(
+        (x) => x.date === date && x.state === 'approved' && x.timetable_id === current.timetable_id,
+      );
+      const subAt = (l: { class_id: string; lesson_no: number }) =>
+        daySubs.find((x) => x.class_id === l.class_id && x.lesson_no === l.lesson_no);
       const lessons = current.lessons
-        .filter(
-          (l) =>
-            l.day === day &&
-            (scope === 'class' ? l.class_id === cls.class_id : l.teacher_id === teacher.teacher_id),
-        )
+        .filter((l) => {
+          if (l.day !== day) return false;
+          const s = subAt(l);
+          if (scope === 'class') return l.class_id === cls.class_id && s?.kind !== 'cancelled';
+          // вчитель: свої уроки без тих, де його замінили, і уроки, де він новий вчитель
+          return s ? s.new_teacher_id === teacher.teacher_id : l.teacher_id === teacher.teacher_id;
+        })
         .sort((a, b) => a.lesson_no - b.lesson_no)
         .map((l) => ({
           lesson_no: l.lesson_no,
@@ -229,7 +471,7 @@ function publicTimetable(scope: 'class' | 'teacher'): PublicTimetable {
           ...(scope === 'class'
             ? { subject: d.subjects.find((s) => s.subject_id === l.subject_id)!.name }
             : { class_name: d.classes.find((c) => c.class_id === l.class_id)!.name }),
-          substitution: w === 0 && day === 3 && l.lesson_no === 2,
+          substitution: !!subAt(l),
         }));
       // у вчителя без уроків цього дня формату немає
       return { date, format: scope === 'teacher' && !lessons.length ? null : fmt.format, lessons };
@@ -250,6 +492,25 @@ function publicTimetable(scope: 'class' | 'teacher'): PublicTimetable {
     weeks,
   };
 }
+
+// Демо, як у прототипі: одна погоджена заміна й одна пропозиція на найближчі навчальні дні.
+(function seedSubstitutions() {
+  const [first, second] = schoolDates(todayKyiv(), addDaysIsoLocal(todayKyiv(), 10));
+  const seed = (teacherId: string, date: string | undefined, approve: boolean) => {
+    if (!date) return;
+    const res = createAbsence({ teacher_id: teacherId, date_from: date, date_to: date });
+    if (res.status !== 202) return;
+    const a = absences.at(-1)!;
+    for (const [id, j] of jobs) {
+      if (j.absenceId !== a.absence_id) continue;
+      j.createdAt -= 10_000; // уже пораховано
+      jobView(id);
+      if (approve) approveSubstitution(id, []);
+    }
+  };
+  seed('t5', first, true);
+  seed('t6', second, false);
+})();
 
 function handle(url: URL, path: string, method: string, init: RequestInit | undefined) {
   const body = init?.body ? JSON.parse(String(init.body)) : undefined;
@@ -341,6 +602,55 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
   if (path === '/school/subjects') return json(200, d.subjects);
 
   // ── канікули (етап 2): дві дати або обидві null ──
+  // ── етап 2: відсутності й заміни ──
+  if (path === '/timetable/absences' && method === 'POST') return createAbsence(body);
+  if (path === '/timetable/absences' && method === 'GET') {
+    const today = todayKyiv();
+    return json(
+      200,
+      absences
+        .filter((a) => !a.cancelled && a.date_to >= today)
+        .sort((x, y) => x.date_from.localeCompare(y.date_from))
+        .map(absenceView),
+    );
+  }
+  if ((m = path.match(/^\/timetable\/absences\/([^/]+)$/)) && method === 'DELETE') {
+    const a = absences.find((x) => x.absence_id === m![1] && !x.cancelled);
+    if (!a) return notFound();
+    a.cancelled = true;
+    const ids = new Set(absenceView(a).jobs.map((j) => j.job_id));
+    for (const x of subs) if (ids.has(x.job_id)) x.state = 'rejected';
+    const t = d.teachers.find((x) => x.teacher_id === a.teacher_id);
+    audit('Скасовано відсутність', t ? `Вчитель #${t.teacher_no}` : null);
+    return json(200, { cancelled: true });
+  }
+  if (path === '/timetable/substitutions' && method === 'GET') {
+    const date = url.searchParams.get('date') ?? '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return problem(422, 'invalid_date', 'Некоректна дата');
+    for (const [id, j] of jobs) if (j.kind === 'substitution' && j.date === date) jobView(id);
+    return json(
+      200,
+      subs
+        .filter((x) => x.date === date)
+        .sort((a, b) => a.class_id.localeCompare(b.class_id) || a.lesson_no - b.lesson_no),
+    );
+  }
+  if (
+    (m = path.match(/^\/timetable\/substitutions\/([^/:]+):(approve|reject)$/)) &&
+    method === 'POST'
+  ) {
+    if (m[2] === 'approve') return approveSubstitution(m[1]!, (body?.cancel ?? []) as never);
+    const j = jobs.get(m[1]!);
+    if (!j || j.kind !== 'substitution')
+      return problem(404, 'not_found', 'Задачу заміни не знайдено');
+    for (const x of subs) if (x.job_id === m[1] && x.state === 'proposed') x.state = 'rejected';
+    audit('Відхилено пропозицію заміни', null, { дата: formatDate(j.date!) });
+    return json(
+      200,
+      subs.filter((x) => x.job_id === m![1]),
+    );
+  }
+
   if (path === '/timetable/holidays' && method === 'GET') return json(200, holidays);
   if (path === '/timetable/holidays' && method === 'PUT') {
     const { holiday_from: f, holiday_to: t } = body as typeof holidays;
@@ -385,8 +695,17 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
           state: v.state,
           lessons: v.lessons.filter((l) => l.teacher_id === t.teacher_id).length,
         })),
-      absences: [],
-      substitutions: [],
+      absences: absences
+        .filter((a) => a.teacher_id === t.teacher_id)
+        .map(({ date_from, date_to, lesson_nos, cancelled }) => ({
+          date_from,
+          date_to,
+          lesson_nos,
+          cancelled,
+        })),
+      substitutions: subs
+        .filter((x) => x.original_teacher_id === t.teacher_id || x.new_teacher_id === t.teacher_id)
+        .map(({ date, lesson_no, kind, state }) => ({ date, lesson_no, kind, state })),
     });
   }
   if ((m = path.match(/^\/school\/teachers\/([^/]+)$/))) {
@@ -471,7 +790,9 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     if (overlaps) return problem(409, 'overlap', 'Перетин з іншою активацією');
     alertPlan.activations.push({ activation_id: crypto.randomUUID(), from: body.from, to: null });
     audit('Активовано розклад тривог', null, { з: body.from });
-    return json(200, { warnings: { lost_substitutions: [] } });
+    return json(200, {
+      warnings: { lost_substitutions: lostFrom(body.from, alertPlan.timetable_id ?? '') },
+    });
   }
   if ((m = path.match(/^\/timetable\/alert-plan\/activations\/([^/:]+):end$/))) {
     const a = alertPlan.activations.find((x) => x.activation_id === m![1]);
@@ -541,6 +862,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
         v.published_at = null;
       }
     }
+    const lost = lostFrom(req.effective_from, tt.timetable_id);
     tt.state = 'published';
     tt.effective_from = req.effective_from;
     tt.published_at = new Date().toISOString();
@@ -548,7 +870,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
       наказ: req.order_no,
       'діє з': formatDate(req.effective_from),
     });
-    return json(200, { timetable: d.summary(tt), warnings: { lost_substitutions: [] } });
+    return json(200, { timetable: d.summary(tt), warnings: { lost_substitutions: lost } });
   }
   // ── етап 2: ручна правка й копія ──
   if (

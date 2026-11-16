@@ -219,6 +219,11 @@ export interface Job {
   started_at: IsoDateTime | null;
   conflicts?: Conflict[];
   result?: { timetable_id: Uuid } | { alert_plan: true } | { proposals: unknown[] };
+  /**
+   * Код збою для failed / rejected (contracts 0.4.0), напр. `unsupported_job_type` — solver
+   * без рушія замін одразу відповідає на задачу substitution відмовою.
+   */
+  error?: string | null;
 }
 
 // ───────────── timetable: версії ─────────────
@@ -271,6 +276,10 @@ export interface LimitUsage {
   ok?: boolean;
 }
 
+/** Причина формату класо-дня (validator-lib 0.3+, contracts 0.4.1). */
+export type LoadReason =
+  'priority' | 'capacity_available' | 'day_limit' | 'no_shelter' | 'no_lessons';
+
 export interface LoadPeak {
   condition: 'seats' | 'passport';
   day: Day;
@@ -294,7 +303,8 @@ export interface TimetableLoad {
     day: Day;
     format: DayFormat;
     lessons?: number;
-    reason: string; // ліміт дня, пріоритет, «не в укритті»
+    /** чому такий формат (contracts 0.4.1); тексти — src/lib/reasons.ts */
+    reason: LoadReason | (string & {});
   }[];
   summary: {
     remote_class_days: number;
@@ -377,6 +387,40 @@ export interface Absence {
   lesson_nos: number[] | null;
   created_at: IsoDateTime;
   jobs: { job_id: Uuid; date: IsoDate; state: JobState }[];
+}
+
+// ───────────── заміни (етап 2) ─────────────
+
+/**
+ * teacher — новий вчитель; moved — урок перенесено (moved_to); self_study — самостійна робота;
+ * cancelled — укладач обрав «скасовано» замість самостійної роботи під час погодження.
+ */
+export type SubstitutionKind = 'teacher' | 'moved' | 'self_study' | 'cancelled';
+export type SubstitutionState = 'proposed' | 'approved' | 'rejected';
+
+/** Накладка на урок (GET /substitutions?date=, відповідь :approve / :reject). */
+export interface Substitution {
+  job_id: Uuid;
+  date: IsoDate;
+  class_id: Uuid;
+  lesson_no: number;
+  /** версія, від якої пораховано заміну; якщо на дату діє інша — заміна втратила силу */
+  timetable_id: Uuid;
+  subject_id: Uuid;
+  original_teacher_id: Uuid;
+  kind: SubstitutionKind;
+  new_teacher_id: Uuid | null;
+  /** новий вчитель не веде цей предмет («не за фахом») */
+  off_profile: boolean;
+  moved_to: { date: IsoDate; lesson_no: number } | null;
+  /** крок пошуку solver: 1 — вільний вчитель, 2 — перебудова дня, 3 — сусідні дні */
+  step: number | null;
+  state: SubstitutionState;
+}
+
+export interface ApproveSubstitutionRequest {
+  /** самостійна робота → «скасовано» для цих уроків */
+  cancel?: { class_id: Uuid; lesson_no: number }[];
 }
 
 // ───────────── QR ─────────────

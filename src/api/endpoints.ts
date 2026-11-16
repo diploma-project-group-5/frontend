@@ -6,6 +6,7 @@ import type {
   AccessToken,
   AlertHours,
   AlertPlan,
+  ApproveSubstitutionRequest,
   AuditEntry,
   Bell,
   ClassInput,
@@ -24,6 +25,7 @@ import type {
   SchoolRegistration,
   Subject,
   SubjectInput,
+  Substitution,
   Teacher,
   TeacherInput,
   TimetableDetail,
@@ -124,7 +126,16 @@ export const timetableApi = {
   /** Етап 2 · відсутність вчителя → 202: absence_id (для скасування) і задачі substitution. */
   createAbsence: (body: AbsenceInput) => api.post<AbsenceAccepted>('/timetable/absences', body),
   absences: () => api.get<Absence[]>('/timetable/absences'),
-  deleteAbsence: (id: string) => api.delete<void>(`/timetable/absences/${encodeURIComponent(id)}`),
+  deleteAbsence: (id: string) =>
+    api.delete<{ cancelled: true }>(`/timetable/absences/${encodeURIComponent(id)}`),
+  /** Накладки на дату: запропоновані, погоджені й відхилені. */
+  substitutions: (date: string) =>
+    api.get<Substitution[]>('/timetable/substitutions', { query: { date } }),
+  /** 409: stale (на дату діє інша версія) / conflicts / slot_taken / job_not_ready. */
+  approveSubstitution: (jobId: string, body: ApproveSubstitutionRequest = {}) =>
+    api.post<Substitution[]>(`/timetable/substitutions/${encodeURIComponent(jobId)}:approve`, body),
+  rejectSubstitution: (jobId: string) =>
+    api.post<Substitution[]>(`/timetable/substitutions/${encodeURIComponent(jobId)}:reject`),
 
   accessTokens: (type: TokenScope) =>
     api.get<AccessToken[]>('/timetable/access-tokens', { query: { type } }),

@@ -106,4 +106,17 @@ describe('Розклад · редактор чернетки', () => {
     await user.keyboard('{Escape}');
     expect(lessons('5-А')[0]).toHaveAttribute('aria-pressed', 'false');
   });
+
+  it('клік на формат класу — причина українською, без сирого коду (frontend #6)', async () => {
+    const view = renderPage(<TimetablesPage />, {
+      path: '/scheduler/timetables/:id?',
+      url: '/scheduler/timetables',
+    });
+    const row = (await screen.findByRole('rowheader', { name: /^5-А/ })).closest('tr')!;
+    await view.user.click(within(row).getByRole('button', { name: /очно|дистанційно/ }));
+    const status = screen.getByRole('status');
+    // у статусі опублікованої версії ще й кнопка «Створити копію для правок»
+    expect(status).toHaveTextContent(/^5-А, понеділок: (очно|дистанційно): [^.]+\./);
+    expect(status.textContent).not.toMatch(/[a-z_]{4,}/);
+  });
 });
