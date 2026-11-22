@@ -224,12 +224,12 @@ function TemporaryPassword({
     onDone();
   };
   return (
-    <Modal open={!!created} onClose={done} title="Заклад зареєстровано">
+    <Modal open={!!created} onClose={done} title="Заклад зареєстровано" dismissible={false}>
       {created && (
         <div className={s.form}>
           <p className="muted">
             Укладач розкладу закладу «{created.name}». Передайте логін і тимчасовий пароль захищеним
-            каналом. Після закриття вікна пароль переглянути не можна.
+            каналом. Після закриття вікна («Готово») пароль переглянути не можна.
           </p>
           <Field label="Логін">
             {(id) => <input id={id} readOnly className="mono" value={created.data.login} />}

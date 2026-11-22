@@ -1,6 +1,7 @@
 import Keycloak from 'keycloak-js';
 import { config } from '@/config';
 import { setTokenProvider } from '@/api/http';
+import { clearSessionState } from '@/lib/session';
 
 /**
  * Вхід — Keycloak за маршрутом /idp, Authorization Code + PKCE (розділ 08).
@@ -60,5 +61,6 @@ export function currentIdentity(): Identity {
 }
 
 export function logout() {
+  clearSessionState(); // наступний користувач у цій вкладці не має бачити чужих задач
   return keycloak.logout({ redirectUri: window.location.origin + '/' });
 }

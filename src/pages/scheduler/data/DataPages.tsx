@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { Outlet } from 'react-router';
 import { schoolApi } from '@/api/endpoints';
+import { useUnsavedChanges } from '@/lib/unsaved';
 import type { SchoolProfile } from '@/api/types';
 import {
   Button,
@@ -45,21 +46,31 @@ export function DataLayout() {
 
 // ───────────── Заклад: профіль і дзвінки ─────────────
 
-const PROFILE_FIELDS: [keyof SchoolProfile, string, string?][] = [
-  ['shelter_capacity', 'Паспортна місткість укриття, осіб'],
-  ['non_teaching_staff', 'Непедагогічний персонал у будівлі', 'рахується в ліміт кожного дня'],
+/** [поле, підпис, підказка, min, max] — межі як у схемі school-service (PUT /school). */
+const PROFILE_FIELDS: [keyof SchoolProfile, string, string | undefined, number, number][] = [
+  ['shelter_capacity', 'Паспортна місткість укриття, осіб', undefined, 0, 100_000],
+  [
+    'non_teaching_staff',
+    'Непедагогічний персонал у будівлі',
+    'рахується в ліміт кожного дня',
+    0,
+    10_000,
+  ],
   [
     'shelter_seats',
     'Облаштовані навчальні місця в укритті',
     'ліміт учнів для розкладу тривог (1.2)',
+    0,
+    100_000,
   ],
-  ['lessons_per_day', 'Уроків на день'],
+  ['lessons_per_day', 'Уроків на день', undefined, 1, 10],
 ];
 
 export function SchoolTab() {
   const qc = useQueryClient();
   const profile = useQuery({ queryKey: ['profile'], queryFn: schoolApi.getProfile });
   const [draft, setDraft] = useState<Partial<SchoolProfile> | null>(null);
+  useUnsavedChanges(draft !== null, { title: 'Дані закладу не збережено' });
 
   const save = useMutation({
     mutationFn: (p: Partial<SchoolProfile>) => schoolApi.putProfile(p),
@@ -85,13 +96,17 @@ export function SchoolTab() {
         <form onSubmit={submit}>
           <Stack>
             <h3>Укриття й навчальний тиждень · {profile.data.name}</h3>
-            {PROFILE_FIELDS.map(([key, label, hint]) => (
+            {PROFILE_FIELDS.map(([key, label, hint, min, max]) => (
               <Field key={key} label={label} hint={hint}>
                 {(id) => (
                   <input
                     id={id}
                     type="number"
-                    min={0}
+                    min={min}
+                    max={max}
+                    // заповнене поле не можна «обнулити»: без нього формула місткості невизначена,
+                    // а публікація й заміни рахують місткість як 0 і падають у stale
+                    required={profile.data[key] !== null}
                     value={(p[key] as number | null) ?? ''}
                     onChange={(e) =>
                       setDraft((d) => ({

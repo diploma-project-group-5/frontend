@@ -5,6 +5,7 @@ import type { ReactElement } from 'react';
 import { createMemoryRouter, RouterProvider, useLocation } from 'react-router';
 import { AuthContext, type AuthValue } from '@/auth/AuthContext';
 import type { Role } from '@/auth/keycloak';
+import { UnsavedChangesPrompt } from '@/ui';
 
 /**
  * Мок-бекенд src/mocks (той самий, що й у `npm run dev:mock`) у пам'яті, без затримки мережі.
@@ -38,7 +39,16 @@ export function renderPage(
   });
   const router = createMemoryRouter(
     [
-      { path, element: ui },
+      {
+        path,
+        element: (
+          <>
+            {ui}
+            {/* як у CabinetLayout: один блокер незбережених змін на роутер */}
+            <UnsavedChangesPrompt />
+          </>
+        ),
+      },
       { path: '*', element: <Elsewhere /> },
     ],
     { initialEntries: [url] },

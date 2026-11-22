@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { timetableApi } from '@/api/endpoints';
 import type { Holidays } from '@/api/types';
 import { formatDate } from '@/lib/time';
+import { useUnsavedChanges } from '@/lib/unsaved';
 import { Button, Card, Field, ProblemNotice, Spinner, Stack } from '@/ui';
 import { IconPlus, IconTrash } from '@/ui/icons';
 import s from './DataPages.module.css';
@@ -18,6 +19,7 @@ export function CalendarTab() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [error, setError] = useState<string | null>(null);
+  useUnsavedChanges(!!(from || to), { title: 'Канікули не збережено' });
 
   const save = useMutation({
     mutationFn: (h: Holidays) => timetableApi.putHolidays(h),

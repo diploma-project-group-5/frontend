@@ -4,15 +4,17 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { schoolApi, timetableApi } from '@/api/endpoints';
 import { isApiError } from '@/api/http';
 import type { Day, Lesson, TimetableLoad, TimetableSummary } from '@/api/types';
-import { isTerminal, JOB_STATE_LABEL, useJob } from '@/api/useJob';
+import { isTerminal, JOB_STATE_LABEL, jobErrorText, useJob } from '@/api/useJob';
+import { useSingleFlight } from '@/api/useSingleFlight';
+import { useAuth } from '@/auth/AuthContext';
 import { conflictNames, describeConflict, useConflictNames } from '@/lib/conflicts';
 import { reasonText } from '@/lib/reasons';
+import { activeBuildJobKey } from '@/lib/session';
 import { DAY_SHORT, formatDate, peakText, publishedPhase, todayKyiv } from '@/lib/time';
 import { Badge, Button, Chip, Notice, PageHeader, ProblemNotice, Spinner } from '@/ui';
 import { IconOk, IconRefresh, IconWarn } from '@/ui/icons';
 import s from './TimetablesPage.module.css';
 
-const ACTIVE_JOB_KEY = 'lad.activeBuildJob';
 const PHASE_LABEL = { scheduled: 'Запланована', current: 'Чинна', archived: 'Архівна' } as const;
 const DAY_FULL = ['', 'понеділок', 'вівторок', 'середа', 'четвер', 'пʼятниця', 'субота'] as const;
 
@@ -29,11 +31,14 @@ export function TimetablesPage() {
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ['timetables'], queryFn: timetableApi.list });
   const [showAll, setShowAll] = useState(false);
+  const { schoolId } = useAuth();
+  const jobKey = activeBuildJobKey(schoolId);
 
-  // job_id тримаємо в sessionStorage, щоб опитування пережило оновлення сторінки
+  // job_id тримаємо в sessionStorage, щоб опитування пережило оновлення сторінки; ключ — свій
+  // для закладу, а вихід прибирає його зовсім (src/lib/session.ts)
   const [jobId, setJobId] = useState<string | null>(() => {
     try {
-      return sessionStorage.getItem(ACTIVE_JOB_KEY);
+      return sessionStorage.getItem(jobKey);
     } catch {
       return null;
     }
@@ -51,12 +56,12 @@ export function TimetablesPage() {
   });
   useEffect(() => {
     try {
-      if (jobId) sessionStorage.setItem(ACTIVE_JOB_KEY, jobId);
-      else sessionStorage.removeItem(ACTIVE_JOB_KEY);
+      if (jobId) sessionStorage.setItem(jobKey, jobId);
+      else sessionStorage.removeItem(jobKey);
     } catch {
       /* приватний режим — без збереження */
     }
-  }, [jobId]);
+  }, [jobId, jobKey]);
   useEffect(() => {
     if (job.data?.state === 'done') void qc.invalidateQueries({ queryKey: ['timetables'] });
   }, [job.data?.state, qc]);
@@ -212,7 +217,8 @@ function JobStatus({
   return (
     <Notice tone="bad">
       <p>
-        {JOB_STATE_LABEL[j.state]}. <button onClick={onDismiss}>Закрити</button>
+        {JOB_STATE_LABEL[j.state]}. {jobErrorText(j.error)}{' '}
+        <button onClick={onDismiss}>Закрити</button>
       </p>
       {j.conflicts && j.conflicts.length > 0 && (
         <ul>
@@ -330,6 +336,8 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
       onOpen(c.timetable_id);
     },
   });
+  // :copy не ідемпотентний — подвійний клік створював дві чернетки
+  const copyOnce = useSingleFlight(copy);
 
   useEffect(() => {
     if (!sel) return;
@@ -509,7 +517,11 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
               </ul>
             )}
             {!editable && v.kind === 'main' && (
-              <Button size="sm" disabled={copy.isPending} onClick={() => copy.mutate()}>
+              <Button
+                size="sm"
+                disabled={copy.isPending || copy.isSuccess}
+                onClick={() => copyOnce()}
+              >
                 Створити копію для правок
               </Button>
             )}

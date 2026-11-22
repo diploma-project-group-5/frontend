@@ -1,6 +1,7 @@
 import type { ComponentType, SVGProps } from 'react';
 import { NavLink, Outlet } from 'react-router';
 import { useAuth } from '@/auth/AuthContext';
+import { UnsavedChangesPrompt } from '@/ui';
 import { IconCheck, IconDb, IconGrid, IconLayers, IconLog, IconSchool, IconSwap } from '@/ui/icons';
 import { StatusChips } from './StatusChips';
 import s from './CabinetLayout.module.css';
@@ -61,6 +62,7 @@ export function CabinetLayout() {
       <main className={s.main}>
         {!isAdmin && <StatusChips />}
         <Outlet />
+        <UnsavedChangesPrompt />
       </main>
     </div>
   );

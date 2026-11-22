@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { schoolApi } from '@/api/endpoints';
+import { auditActionLabel, formatAuditDetails } from '@/lib/audit';
 import { addDaysIso, todayKyiv } from '@/lib/time';
 import { Card, Field, PageHeader, ProblemNotice, Spinner } from '@/ui';
 
@@ -70,13 +71,9 @@ export function JournalPage() {
                 <tr key={e.entry_id}>
                   <td className="mono">{timeFmt.format(new Date(e.at))}</td>
                   <td>{e.actor}</td>
-                  <td>{e.action}</td>
+                  <td title={e.action}>{auditActionLabel(e.action)}</td>
                   <td>{e.target ?? '—'}</td>
-                  <td className="muted">
-                    {Object.entries(e.details)
-                      .map(([k, v]) => `${k}: ${String(v)}`)
-                      .join(', ')}
-                  </td>
+                  <td className="muted">{formatAuditDetails(e.details)}</td>
                 </tr>
               ))}
               {audit.data.length === 0 && (
