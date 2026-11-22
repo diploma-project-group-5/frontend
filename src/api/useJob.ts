@@ -42,3 +42,23 @@ export const JOB_STATE_LABEL: Record<Job['state'], string> = {
   timeout: 'Не встигли за ліміт часу',
   failed: 'Технічний збій',
 };
+
+/**
+ * Людські пояснення кодів job.error (timetable-service domain/jobs.ts). Без них rejected від
+ * validator-lib і rejected через заблокований план виглядали однаково — «Відхилено перевіркою».
+ */
+const JOB_ERROR_TEXT: Record<string, string> = {
+  validator_rejected:
+    'Незалежна перевірка (validator-lib) не прийняла розклад від солвера. Порушені правила — нижче.',
+  invalid_snapshot: 'Дані закладу для побудови некоректні. Перевірте «Дані закладу» й повторіть.',
+  alert_plan_locked:
+    'План тривог уже погоджено або активовано, тому результат побудови не застосовано.',
+  deadline_exceeded: 'Задача задовго чекала в черзі й була скасована. Спробуйте ще раз.',
+  unsupported_job_type: 'Рушій розрахунку на сервері не підтримує цей тип задачі.',
+};
+
+/** Пояснення кінцевого стану задачі: текст за кодом error або null, якщо коду немає. */
+export function jobErrorText(error: string | null | undefined): string | null {
+  if (!error) return null;
+  return JOB_ERROR_TEXT[error] ?? `Код збою: ${error}`;
+}

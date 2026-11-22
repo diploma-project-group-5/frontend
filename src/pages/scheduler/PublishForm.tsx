@@ -4,6 +4,7 @@ import { timetableApi } from '@/api/endpoints';
 import { isApiError } from '@/api/http';
 import type { PublishResponse } from '@/api/types';
 import { describeConflict, useConflictNames } from '@/lib/conflicts';
+import { NON_BLANK } from '@/lib/forms';
 import { formatDate, minEffectiveFrom, todayKyiv } from '@/lib/time';
 import { Button, Field, Notice, ProblemNotice, Stack } from '@/ui';
 
@@ -30,7 +31,12 @@ export function PublishForm({
   const names = useConflictNames();
 
   const publish = useMutation({
-    mutationFn: () => timetableApi.publish(timetableId, form),
+    mutationFn: () =>
+      timetableApi.publish(timetableId, {
+        ...form,
+        order_no: form.order_no.trim(),
+        approved_by: form.approved_by.trim(),
+      }),
     onSuccess: (res) => {
       onPublished(res, form.effective_from);
       void qc.invalidateQueries({ queryKey: ['timetables'] });
@@ -54,7 +60,16 @@ export function PublishForm({
           реквізитами наказу.
         </p>
         <Field label="Наказ №">
-          {(id) => <input id={id} required value={form.order_no} onChange={set('order_no')} />}
+          {(id) => (
+            <input
+              id={id}
+              required
+              pattern={NON_BLANK}
+              title="Вкажіть номер наказу"
+              value={form.order_no}
+              onChange={set('order_no')}
+            />
+          )}
         </Field>
         <Field label="Дата наказу">
           {(id) => (
@@ -72,6 +87,8 @@ export function PublishForm({
             <input
               id={id}
               required
+              pattern={NON_BLANK}
+              title="Вкажіть, хто затвердив"
               value={form.approved_by}
               onChange={set('approved_by')}
               placeholder="Прізвище І. П., посада"

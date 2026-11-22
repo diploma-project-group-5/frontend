@@ -123,4 +123,62 @@ describe('сторінка класу за QR', () => {
     renderAt('#good.token.mac');
     expect(await screen.findByText(/ще не опубліковано/)).toBeInTheDocument();
   });
+
+  it('інший QR у тій самій вкладці (зміна лише #токена) — новий запит і новий клас', async () => {
+    const fetchMock = vi.fn(async (_url: URL, init: RequestInit) => {
+      const token = (init.headers as Record<string, string>)['X-Access-Token'];
+      const label = token === 'second.token.mac' ? '8-Б' : '7-А';
+      return new Response(JSON.stringify({ ...sample, target_label: label }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderAt('#good.token.mac');
+    expect(await screen.findByRole('heading', { name: '7-А' })).toBeInTheDocument();
+
+    window.location.hash = '#second.token.mac';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    expect(await screen.findByRole('heading', { name: '8-Б' })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('токен вчителя на сторінці класу (/c) — «Посилання недійсне»', async () => {
+    mockFetch(200, {
+      ...sample,
+      target_label: 'Вчитель #3',
+      weeks: [
+        {
+          week: '2026-W45',
+          days: [
+            {
+              date: '2026-11-05',
+              format: 'in_person',
+              lessons: [
+                {
+                  lesson_no: 1,
+                  start: '08:30',
+                  end: '09:15',
+                  class_name: '5-А',
+                  substitution: false,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } satisfies PublicTimetable);
+    renderAt('#teacher.token.mac');
+    expect(await screen.findByText(/Посилання недійсне/)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Вчитель #3' })).not.toBeInTheDocument();
+  });
+
+  it('клас, якого ще немає в опублікованому розкладі: заголовок не порожній, пояснення', async () => {
+    mockFetch(200, {
+      ...sample,
+      target_label: '',
+      weeks: [{ week: '2026-W45', days: [{ date: '2026-11-05', format: 'remote', lessons: [] }] }],
+    } satisfies PublicTimetable);
+    renderAt('#new.token.mac');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Клас' })).toBeInTheDocument();
+    expect(screen.getByText(/Цього класу ще немає в опублікованому розкладі/)).toBeInTheDocument();
+    expect(screen.queryByText('Уроків немає')).not.toBeInTheDocument();
+  });
 });

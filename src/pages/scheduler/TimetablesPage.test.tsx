@@ -29,6 +29,27 @@ describe('Розклад · редактор чернетки', () => {
     await startMockBackend();
   });
 
+  it('подвійний клік «Створити копію для правок» — одна копія', async () => {
+    const mockFetch = globalThis.fetch;
+    let copies = 0;
+    globalThis.fetch = async (input, init) => {
+      if (String(input).endsWith(':copy')) copies++;
+      return mockFetch(input, init);
+    };
+    onTestFinished(() => {
+      globalThis.fetch = mockFetch;
+    });
+    const view = renderPage(<TimetablesPage />, {
+      path: '/scheduler/timetables/:id?',
+      url: '/scheduler/timetables',
+    });
+    await view.user.dblClick(
+      await screen.findByRole('button', { name: 'Створити копію для правок' }),
+    );
+    await vi.waitFor(() => expect(view.router.state.location.pathname).toMatch(/timetables\/.+/));
+    expect(copies).toBe(1);
+  });
+
   it('копія опублікованої версії стає чернеткою, яку можна правити', async () => {
     const { router } = await openCopyOfCurrent();
     expect(screen.getByRole('button', { name: /^Чернетка / })).toHaveAttribute(

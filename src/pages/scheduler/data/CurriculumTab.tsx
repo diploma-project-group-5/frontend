@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Link, useBlocker } from 'react-router';
+import { Link } from 'react-router';
 import { schoolApi } from '@/api/endpoints';
 import type { CurriculumRow } from '@/api/types';
-import { Button, Chip, Modal, ModalActions, Notice, ProblemNotice, Spinner } from '@/ui';
+import { useUnsavedChanges } from '@/lib/unsaved';
+import { Button, Chip, Notice, ProblemNotice, Spinner } from '@/ui';
 import s from './DataPages.module.css';
 
 type Cell = { hours: number; teacher_id: string | null };
@@ -47,7 +48,10 @@ export function CurriculumTab() {
   });
 
   const dirty = draft !== null;
-  const blocker = useBlocker(dirty);
+  useUnsavedChanges(dirty, {
+    title: 'Зміни плану не збережено',
+    text: 'Якщо піти з вкладки, зміни годин і вчителів буде втрачено.',
+  });
 
   const err = plan.error ?? classes.error ?? subjects.error ?? teachers.error;
   if (err) return <ProblemNotice error={err} />;
@@ -260,20 +264,6 @@ export function CurriculumTab() {
           </div>
         </div>
       )}
-
-      <Modal
-        open={blocker.state === 'blocked'}
-        onClose={() => blocker.reset?.()}
-        title="Зміни плану не збережено"
-      >
-        <p>Якщо піти з вкладки, зміни годин і вчителів буде втрачено.</p>
-        <ModalActions>
-          <Button onClick={() => blocker.reset?.()}>Залишитися</Button>
-          <Button variant="danger" onClick={() => blocker.proceed?.()}>
-            Не зберігати
-          </Button>
-        </ModalActions>
-      </Modal>
     </>
   );
 }
