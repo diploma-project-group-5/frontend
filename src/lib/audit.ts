@@ -1,3 +1,4 @@
+import { fieldLabel } from './fields';
 import { formatDate } from './time';
 
 /**
@@ -58,23 +59,6 @@ const DETAIL_LABEL: Record<string, string> = {
   token_id: 'токен',
 };
 
-/** Назви полів у details.fields (profile_updated, class_updated…). */
-const FIELD_LABEL: Record<string, string> = {
-  shelter_capacity: 'місткість укриття',
-  non_teaching_staff: 'непедагогічний персонал',
-  shelter_seats: 'місця в укритті',
-  lessons_per_day: 'уроків на день',
-  saturday: 'субота',
-  name: 'назва',
-  short_name: 'скорочення',
-  label: 'підпис',
-  students: 'учнів',
-  grade: 'паралель',
-  priority: 'пріоритет',
-  weekly_limit: 'ліміт годин',
-  available_days: 'дні роботи',
-};
-
 const VALUE_LABEL: Record<string, string> = {
   class: 'клас',
   teacher: 'вчитель',
@@ -98,9 +82,7 @@ function formatValue(key: string, v: unknown): string {
   if (Array.isArray(v)) {
     if (v.length === 0) return '—';
     return v
-      .map((x) =>
-        key === 'fields' && typeof x === 'string' ? (FIELD_LABEL[x] ?? x) : formatValue(key, x),
-      )
+      .map((x) => (key === 'fields' && typeof x === 'string' ? fieldLabel(x) : formatValue(key, x)))
       .join(', ');
   }
   if (typeof v === 'object') {

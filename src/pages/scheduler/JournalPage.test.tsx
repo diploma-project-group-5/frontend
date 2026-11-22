@@ -23,6 +23,8 @@ it('журнал не показує машинних кодів: дія й де
   await schoolApi.putProfile({ shelter_capacity: 200 });
   renderPage(<JournalPage />);
   expect(await screen.findByRole('cell', { name: 'Змінено профіль закладу' })).toBeInTheDocument();
-  expect(screen.getByRole('cell', { name: 'поля: місткість укриття' })).toBeInTheDocument();
+  expect(
+    screen.getByRole('cell', { name: 'поля: паспортна місткість укриття' }),
+  ).toBeInTheDocument();
   expect(screen.queryByText(/profile_updated|shelter_capacity/)).not.toBeInTheDocument();
 });

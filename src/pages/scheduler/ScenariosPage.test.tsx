@@ -137,23 +137,32 @@ describe('Сценарії: розклад тривог', () => {
     ).toBeInTheDocument();
   });
 
-  it('заплановану активацію можна скасувати до її початку', async () => {
+  it('запланованій активації можна задати дату повернення (:end до її початку)', async () => {
     await startMockBackend();
     const { user } = renderPage(<ScenariosPage />);
     const tomorrow = addDaysIso(todayKyiv(), 1);
+    const back = addDaysIso(todayKyiv(), 3);
     await screen.findByRole('heading', { name: 'Тривоги' });
     fireEvent.change(screen.getByLabelText('З дати'), { target: { value: tomorrow } });
     await user.click(screen.getByRole('button', { name: 'Активувати' }));
     expect(await screen.findByText('запланована')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Скасувати' }));
-    const dialog = within(await screen.findByRole('dialog', { name: /Скасувати перехід/ }));
-    await user.click(dialog.getByRole('button', { name: 'Скасувати активацію' }));
+    const form = within(
+      screen
+        .getByRole('heading', {
+          name: `Повернення звичайного для активації з ${formatDate(tomorrow)}`,
+        })
+        .closest('form')!,
+    );
+    const input = form.getByLabelText('Звичайний розклад з');
+    expect(input).toHaveAttribute('min', addDaysIso(tomorrow, 1));
+    fireEvent.change(input, { target: { value: back } });
+    await user.click(form.getByRole('button', { name: 'Повернути звичайний розклад' }));
 
-    expect(await screen.findByText('Заплановану активацію скасовано.')).toBeInTheDocument();
-    expect(screen.queryByText('запланована')).not.toBeInTheDocument();
-    // план знову можна активувати
-    expect(await screen.findByRole('button', { name: 'Активувати' })).toBeInTheDocument();
+    expect(
+      await screen.findByText(`з ${formatDate(tomorrow)} по ${formatDate(back)}`),
+    ).toBeInTheDocument();
+    expect(screen.getByText('запланована')).toBeInTheDocument(); // активація лишається, коротша
   });
 
   it('подвійний клік «Повернути звичайний розклад» — один запит :end', async () => {

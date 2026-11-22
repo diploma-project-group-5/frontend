@@ -173,9 +173,89 @@ describe('Заміни', () => {
     renderPage(<SubstitutionsPage />, { path: '/scheduler/substitutions' });
     const g = await group('Коваль Н. В.');
     expect(await g.findByRole('status', {}, { timeout: 2000 })).toHaveTextContent(
-      'Автоматичний підбір замін з’явиться на етапі 2. Поки що призначте заміну вручну.',
+      'Солвер на сервері ще не підбирає заміни (версія до 0.4.0). Поки що призначте заміну вручну.',
     );
     expect(g.queryByText(/unsupported_job_type/)).not.toBeInTheDocument();
+  });
+
+  /** Поверх мок-бекенду: одна відсутність Коваль (t2) на сьогодні з задачею в стані `state`. */
+  function stubJob(state: string, extra: object, rows: object[] = []) {
+    const mockFetch = globalThis.fetch;
+    const today = todayKyiv();
+    const absence = {
+      absence_id: 'a-x',
+      teacher_id: 't2',
+      date_from: today,
+      date_to: today,
+      lesson_nos: null,
+      created_at: new Date().toISOString(),
+      jobs: [{ job_id: 'j-x', date: today, state }],
+    };
+    const job = {
+      job_id: 'j-x',
+      kind: 'substitution',
+      state,
+      snapshot_version: 1,
+      created_at: absence.created_at,
+      started_at: null,
+      ...extra,
+    };
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(String(input), window.location.origin);
+      if (url.pathname === '/api/v1/timetable/absences') return Response.json([absence]);
+      if (url.pathname === '/api/v1/timetable/jobs/j-x') return Response.json(job);
+      if (url.pathname === '/api/v1/timetable/substitutions') return Response.json(rows);
+      return mockFetch(input, init);
+    };
+    onTestFinished(() => {
+      globalThis.fetch = mockFetch;
+    });
+  }
+
+  it('задача rejected: конфлікти validator-lib і відхилені пропозиції, без «Погодити»', async () => {
+    await startMockBackend();
+    const today = todayKyiv();
+    stubJob(
+      'rejected',
+      {
+        error: 'validator_rejected',
+        conflicts: [{ rule: 'teacher_double_booked', teacher_id: 't3', day: 1, lesson_no: 2 }],
+      },
+      [
+        {
+          job_id: 'j-x',
+          date: today,
+          class_id: 'c1',
+          lesson_no: 2,
+          timetable_id: 'v1',
+          subject_id: 's1',
+          original_teacher_id: 't2',
+          kind: 'teacher',
+          new_teacher_id: 't3',
+          off_profile: false,
+          moved_to: null,
+          step: 1,
+          state: 'rejected',
+        },
+      ],
+    );
+    renderPage(<SubstitutionsPage />, { path: '/scheduler/substitutions' });
+    const g = await group('Коваль Н. В.');
+    expect(await g.findByText(/Перевірка не прийняла пропозиції солвера/)).toBeInTheDocument();
+    expect(await g.findByText(/: накладка уроків \(понеділок, 2 урок\)\./)).toBeInTheDocument();
+    expect(g.getByText('Відхилено перевіркою')).toBeInTheDocument();
+    expect(g.queryByRole('button', { name: /Погодити/ })).not.toBeInTheDocument();
+  });
+
+  it('задача failed: причина за кодом error, без машинного коду', async () => {
+    await startMockBackend();
+    stubJob('failed', { error: 'invalid_result' });
+    renderPage(<SubstitutionsPage />, { path: '/scheduler/substitutions' });
+    const g = await group('Коваль Н. В.');
+    expect(await g.findByRole('status', {}, { timeout: 2000 })).toHaveTextContent(
+      /Технічний збій.*Солвер повернув некоректний результат/,
+    );
+    expect(g.queryByText(/invalid_result/)).not.toBeInTheDocument();
   });
 
   it('409 teacher_is_substitute: відсутність замінника, уже погодженого на ці уроки', async () => {
@@ -196,6 +276,8 @@ describe('Заміни', () => {
     expect(
       await screen.findByText(/Цей вчитель уже погоджений замінником у ці дні й уроки/),
     ).toBeInTheDocument();
+    // уроки з lessons[] відповіді — з назвою класу й номером
+    expect(screen.getByText(new RegExp(`урок ${row.lesson_no}$`))).toBeInTheDocument();
   });
 
   it('409 date_passed: пропозицію на минулу дату не погодити', async () => {
@@ -220,7 +302,9 @@ describe('Заміни', () => {
     });
     const g = await group('Олійник В. Д.'); // перша група — перша (уже минула) дата
     await user.click(await g.findByRole('button', { name: /Погодити/ }));
-    expect(await g.findByText(/Дата заміни вже минула/)).toBeInTheDocument();
+    expect(
+      await g.findByText(/Дата заміни \(або дата, на яку переноситься урок\) уже минула/),
+    ).toBeInTheDocument();
   });
 
   it('мітки пропозиції: «інший вчитель», «не за фахом», «самостійна»', async () => {

@@ -31,3 +31,33 @@ describe('ProblemNotice: 400 validation_failed', () => {
     expect(screen.getByText('Урок №2 вказано двічі')).toBeInTheDocument();
   });
 });
+
+describe('ProblemNotice: поля даних закладу', () => {
+  it('400 «Поле не можна очистити» — назва поля замість коду', () => {
+    show({
+      code: 'validation_failed',
+      title: 'Поле не можна очистити',
+      detail: 'Вкажіть значення: shelter_capacity',
+    });
+    expect(screen.getByText('Вкажіть значення: паспортна місткість укриття')).toBeInTheDocument();
+  });
+
+  it('422 profile_incomplete — які саме поля заповнити', () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ProblemNotice
+          error={
+            new ApiError(422, {
+              code: 'profile_incomplete',
+              title: 'Профіль закладу неповний',
+              fields: ['shelter_capacity', 'alert_bells'],
+            })
+          }
+        />
+      </QueryClientProvider>,
+    );
+    expect(
+      screen.getByText(/Заповніть: паспортна місткість укриття, дзвінки тривог\./),
+    ).toBeInTheDocument();
+  });
+});

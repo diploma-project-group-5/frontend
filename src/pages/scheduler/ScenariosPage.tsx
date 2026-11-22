@@ -16,8 +16,6 @@ import {
   Card,
   Chip,
   Field,
-  Modal,
-  ModalActions,
   Notice,
   PageHeader,
   ProblemNotice,
@@ -77,7 +75,7 @@ export function ScenariosPage() {
               <dt>Діє з</dt>
               <dd>{current?.effective_from ? formatDate(current.effective_from) : '—'}</dd>
             </dl>
-            {active && <EndActivation activationId={active.activation_id} from={active.from} />}
+            {active && <EndActivation activation={active} />}
           </Card>
 
           <AlertPlanCard plan={plan.data} activeNow={!!active} />
@@ -91,18 +89,6 @@ function AlertPlanCard({ plan, activeNow }: { plan: AlertPlan; activeNow: boolea
   const today = todayKyiv();
   const future = plan.activations.filter((a) => a.from > today);
   const locked = activeNow || future.length > 0;
-  const invalidate = useInvalidatePlan();
-  // ще не чинна активація: :end скасовує її (сервер ігнорує дату, але вимагає коректну)
-  const [confirm, setConfirm] = useState<AlertActivation | null>(null);
-  const cancel = useMutation({
-    mutationFn: (a: AlertActivation) => timetableApi.alertEnd(a.activation_id, a.from),
-    onSuccess: () => {
-      setConfirm(null);
-      invalidate();
-    },
-  });
-  const cancelOnce = useSingleFlight(cancel);
-
   return (
     <Card>
       <div className={s.head}>
@@ -156,17 +142,7 @@ function AlertPlanCard({ plan, activeNow }: { plan: AlertPlan; activeNow: boolea
                 {a.from > today && (
                   <>
                     {' '}
-                    <Badge>запланована</Badge>{' '}
-                    <Button
-                      size="sm"
-                      disabled={cancel.isPending}
-                      onClick={() => {
-                        cancel.reset();
-                        setConfirm(a);
-                      }}
-                    >
-                      Скасувати
-                    </Button>
+                    <Badge>запланована</Badge>
                   </>
                 )}
               </li>
@@ -174,39 +150,15 @@ function AlertPlanCard({ plan, activeNow }: { plan: AlertPlan; activeNow: boolea
           </ul>
         </>
       )}
-      {cancel.isSuccess && (
-        <Notice tone="ok">
-          <p>Заплановану активацію скасовано.</p>
-        </Notice>
-      )}
-      <LostSubstitutions warnings={cancel.data?.warnings} />
-
-      <Modal
-        open={!!confirm}
-        onClose={() => setConfirm(null)}
-        title={confirm ? `Скасувати перехід на розклад тривог з ${formatDate(confirm.from)}?` : ''}
-      >
-        <p>
-          Звичайний розклад діятиме й далі. Погоджені заміни на розкладі тривог у ці дати втратять
-          силу.
-        </p>
-        {cancel.error && <ProblemNotice error={cancel.error} />}
-        <ModalActions>
-          <Button onClick={() => setConfirm(null)}>Не скасовувати</Button>
-          <Button
-            variant="danger"
-            disabled={cancel.isPending}
-            onClick={() => confirm && cancelOnce(confirm)}
-          >
-            Скасувати активацію
-          </Button>
-        </ModalActions>
-      </Modal>
+      {/* запланована активація: :end лише задає дату повернення (скасувати її повністю API не дає) */}
+      {future.map((a) => (
+        <EndActivation key={a.activation_id} activation={a} />
+      ))}
 
       {locked ? (
         <p className="muted">
           Поки є чинна або майбутня активація, перебудувати план і змінити дзвінки тривог не можна.
-          {future.length > 0 && ' Заплановану активацію можна скасувати до її початку.'}
+          {future.length > 0 && ' Для запланованої активації можна задати дату повернення.'}
         </p>
       ) : (
         <Stack>
@@ -400,41 +352,64 @@ function ActivateAlert() {
   );
 }
 
-function EndActivation({ activationId, from }: { activationId: string; from: string }) {
+/**
+ * Повернення звичайного розкладу: :end задає дату, з якої активація більше не діє. Дата — пізніша
+ * за початок активації, не раніше сьогодні й не пізніше вже заданого кінця (інакше 422). Те саме
+ * для ще не чинної активації: вона діятиме від початку до цієї дати.
+ */
+function EndActivation({ activation: a }: { activation: AlertActivation }) {
   const invalidate = useInvalidatePlan();
-  const min = [todayKyiv(), addDaysIso(from, 1)].sort().at(-1)!;
-  const [date, setDate] = useState(min);
+  const today = todayKyiv();
+  const min = [today, addDaysIso(a.from, 1)].sort().at(-1)!;
+  const [date, setDate] = useState(a.to ?? min);
   const end = useMutation({
-    mutationFn: () => timetableApi.alertEnd(activationId, date),
+    mutationFn: (from: string) => timetableApi.alertEnd(a.activation_id, from),
     onSuccess: invalidate,
   });
-  // :end не ідемпотентний: повтор з тією ж датою пише в журнал ще один alert_plan_ended
+  // подвійний клік не шле два :end (сервер повтор з тією ж датою вже не пише в журнал)
   const endOnce = useSingleFlight(end);
+  if (a.to && a.to < min) return null; // коротшою активацію вже не зробити
+  const upcoming = a.from > today;
   return (
     <form
       className={s.inline}
       onSubmit={(e) => {
         e.preventDefault();
-        endOnce();
+        endOnce(date);
       }}
     >
-      <h4>Повернути звичайний</h4>
-      <Field label="З дати">
+      <h4>
+        {upcoming
+          ? `Повернення звичайного для активації з ${formatDate(a.from)}`
+          : 'Повернути звичайний'}
+      </h4>
+      <Field
+        label="Звичайний розклад з"
+        hint={upcoming ? 'Розклад тривог діятиме від початку активації до цієї дати' : undefined}
+      >
         {(id) => (
           <input
             id={id}
             type="date"
             min={min}
+            max={a.to ?? undefined}
             required
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={(e) => {
+              end.reset();
+              setDate(e.target.value);
+            }}
           />
         )}
       </Field>
       {end.error && <ProblemNotice error={end.error} />}
       <LostSubstitutions warnings={end.data?.warnings} />
       <div>
-        <Button type="submit" variant="primary" disabled={end.isPending || end.isSuccess}>
+        <Button
+          type="submit"
+          variant="primary"
+          disabled={end.isPending || date === a.to || (end.isSuccess && end.variables === date)}
+        >
           Повернути звичайний розклад
         </Button>
       </div>
