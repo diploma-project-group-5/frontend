@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { publicApi } from '@/api/endpoints';
 import { isApiError } from '@/api/http';
 import type { PublicDay, PublicTimetable } from '@/api/types';
@@ -23,8 +23,44 @@ export function TeacherTimetablePage() {
 
 const INVALID_TEXT = 'Посилання недійсне. Зверніться до закладу.';
 
-function PublicTimetablePage({ scope }: { scope: 'class' | 'teacher' }) {
-  const token = readTokenFromHash(window.location.hash);
+type Scope = 'class' | 'teacher';
+
+function subscribeHash(cb: () => void) {
+  window.addEventListener('hashchange', cb);
+  window.addEventListener('popstate', cb);
+  return () => {
+    window.removeEventListener('hashchange', cb);
+    window.removeEventListener('popstate', cb);
+  };
+}
+
+/**
+ * Фрагмент URL з підпискою на зміни: перехід за іншим QR у тій самій вкладці (чи «Назад») міняє
+ * лише #токен, сторінка не перезавантажується — без підписки лишався розклад попереднього класу.
+ */
+function useLocationHash() {
+  return useSyncExternalStore(subscribeHash, () => window.location.hash);
+}
+
+/**
+ * Чий розклад віддав сервер. Шлях (/c чи /t) обирає людина, а сервер рендерить за token.scope:
+ * токен класу на /t давав «Розклад вчителя 1-А» з порожніми рядками. Якщо сервер повідомляє scope —
+ * беремо його, інакше визначаємо за полями уроків (subject — клас, class_name — вчитель).
+ */
+function responseScope(data: PublicTimetable): Scope | null {
+  const declared = (data as { scope?: unknown }).scope;
+  if (declared === 'class' || declared === 'teacher') return declared;
+  for (const w of data.weeks)
+    for (const d of w.days)
+      for (const l of d.lessons) {
+        if ('subject' in l && !('class_name' in l)) return 'class';
+        if ('class_name' in l && !('subject' in l)) return 'teacher';
+      }
+  return null;
+}
+
+function PublicTimetablePage({ scope }: { scope: Scope }) {
+  const token = readTokenFromHash(useLocationHash());
 
   useEffect(() => {
     document.title = 'Розклад занять';
@@ -38,8 +74,10 @@ function PublicTimetablePage({ scope }: { scope: 'class' | 'teacher' }) {
     gcTime: 0,
   });
 
+  const wrongScope = !!q.data && (responseScope(q.data) ?? scope) !== scope;
+
   let body;
-  if (!token || (isApiError(q.error) && q.error.status === 404)) {
+  if (!token || (isApiError(q.error) && q.error.status === 404) || wrongScope) {
     body = (
       <Notice tone="warn">
         <p>{INVALID_TEXT}</p>
@@ -67,13 +105,24 @@ function PublicTimetablePage({ scope }: { scope: 'class' | 'teacher' }) {
   );
 }
 
-function TimetableView({ data, scope }: { data: PublicTimetable; scope: 'class' | 'teacher' }) {
+function TimetableView({ data, scope }: { data: PublicTimetable; scope: Scope }) {
+  // назва береться з опублікованих версій: класу, доданого після побудови, у них ще немає
+  const unnamed = !data.target_label.trim();
   return (
     <>
       <header className={s.header}>
         <div className="muted">{scope === 'class' ? 'Розклад класу' : 'Розклад вчителя'}</div>
-        <h1>{data.target_label}</h1>
+        <h1>{unnamed ? (scope === 'class' ? 'Клас' : 'Вчитель') : data.target_label}</h1>
       </header>
+
+      {unnamed && data.state === 'published' && (
+        <Notice tone="info">
+          <p>
+            {scope === 'class' ? 'Цього класу' : 'Цього вчителя'} ще немає в опублікованому
+            розкладі. Зверніться до закладу.
+          </p>
+        </Notice>
+      )}
 
       {data.upcoming_change && (
         <Notice tone="info">
@@ -81,7 +130,7 @@ function TimetableView({ data, scope }: { data: PublicTimetable; scope: 'class' 
         </Notice>
       )}
 
-      {data.state === 'not_published' ? (
+      {unnamed && data.state === 'published' ? null : data.state === 'not_published' ? (
         <Notice tone="info">
           <p>Розклад ще не опубліковано.</p>
         </Notice>
@@ -99,7 +148,7 @@ function TimetableView({ data, scope }: { data: PublicTimetable; scope: 'class' 
   );
 }
 
-function DayCard({ day, scope }: { day: PublicDay; scope: 'class' | 'teacher' }) {
+function DayCard({ day, scope }: { day: PublicDay; scope: Scope }) {
   if (day.holiday) {
     return (
       <article className={s.day}>

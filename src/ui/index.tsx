@@ -163,13 +163,31 @@ const CODE_TEXT: Record<string, string> = {
   published_readonly: 'Опубліковану версію змінювати не можна.',
   profile_incomplete: 'Профіль закладу заповнено не повністю.',
   alert_plan_active: 'На ці дати діє розклад тривог.',
+  alert_plan_locked: 'План тривог погоджено або активовано — змінити його зараз не можна.',
+  alert_plan_missing: 'Шаблону розкладу тривог ще немає. Спершу побудуйте план.',
+  alert_plan_not_approved: 'План тривог не погоджено. Спершу погодьте його наказом.',
+  activation_overlap: 'На ці дати вже є інша активація розкладу тривог.',
 };
+
+const VALIDATION_FALLBACK =
+  'Сервер не прийняв дані. Перевірте значення полів: можливо, число завелике або поле порожнє.';
+
+/**
+ * Текст для 400 validation_failed: власні перевірки сервісів пишуть detail українською, а помилки
+ * схеми (fastify/AJV) — англійською з шляхами body/…; такий машинний текст укладачу не показуємо.
+ */
+function validationText(detail: string | undefined) {
+  return detail && /[а-яіїєґ]/i.test(detail) ? detail : VALIDATION_FALLBACK;
+}
 
 export function ProblemNotice({ error }: { error: unknown }) {
   const names = useCachedConflictNames();
   if (!error) return null;
   if (error instanceof ApiError) {
-    const text = (error.code && CODE_TEXT[error.code]) || error.detail || error.title;
+    const text =
+      error.code === 'validation_failed'
+        ? validationText(error.detail)
+        : (error.code && CODE_TEXT[error.code]) || error.detail || error.title;
     return (
       <Notice tone="bad">
         <p>{text}</p>
@@ -191,3 +209,4 @@ export function ProblemNotice({ error }: { error: unknown }) {
 }
 
 export { Modal, ModalActions } from './Modal';
+export { UnsavedChangesPrompt } from './UnsavedChangesPrompt';

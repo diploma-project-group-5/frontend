@@ -1,10 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { timetableApi } from '@/api/endpoints';
+import { schoolApi, timetableApi } from '@/api/endpoints';
 import { isApiError } from '@/api/http';
-import type { AlertPlan, Warnings } from '@/api/types';
-import { isTerminal, JOB_STATE_LABEL, useJob } from '@/api/useJob';
+import type { AlertActivation, AlertPlan, Conflict, Warnings } from '@/api/types';
+import { isTerminal, JOB_STATE_LABEL, jobErrorText, useJob } from '@/api/useJob';
+import { useSingleFlight } from '@/api/useSingleFlight';
+import { describeConflict, useConflictNames } from '@/lib/conflicts';
+import { NON_BLANK } from '@/lib/forms';
 import { activeActivation, mainPhases } from '@/lib/phases';
 import { addDaysIso, formatDate, todayKyiv } from '@/lib/time';
 import {
@@ -13,6 +16,8 @@ import {
   Card,
   Chip,
   Field,
+  Modal,
+  ModalActions,
   Notice,
   PageHeader,
   ProblemNotice,
@@ -20,6 +25,7 @@ import {
   Stack,
 } from '@/ui';
 import { IconLayers, IconOk } from '@/ui/icons';
+import { BellsForm, MAX_BELLS } from './data/BellsCard';
 import s from './ScenariosPage.module.css';
 
 /**
@@ -85,6 +91,17 @@ function AlertPlanCard({ plan, activeNow }: { plan: AlertPlan; activeNow: boolea
   const today = todayKyiv();
   const future = plan.activations.filter((a) => a.from > today);
   const locked = activeNow || future.length > 0;
+  const invalidate = useInvalidatePlan();
+  // ще не чинна активація: :end скасовує її (сервер ігнорує дату, але вимагає коректну)
+  const [confirm, setConfirm] = useState<AlertActivation | null>(null);
+  const cancel = useMutation({
+    mutationFn: (a: AlertActivation) => timetableApi.alertEnd(a.activation_id, a.from),
+    onSuccess: () => {
+      setConfirm(null);
+      invalidate();
+    },
+  });
+  const cancelOnce = useSingleFlight(cancel);
 
   return (
     <Card>
@@ -136,19 +153,64 @@ function AlertPlanCard({ plan, activeNow }: { plan: AlertPlan; activeNow: boolea
               <li key={a.activation_id}>
                 з {formatDate(a.from)}
                 {a.to ? ` по ${formatDate(a.to)}` : ' — діє далі'}
-                {a.from > today && <Badge>запланована</Badge>}
+                {a.from > today && (
+                  <>
+                    {' '}
+                    <Badge>запланована</Badge>{' '}
+                    <Button
+                      size="sm"
+                      disabled={cancel.isPending}
+                      onClick={() => {
+                        cancel.reset();
+                        setConfirm(a);
+                      }}
+                    >
+                      Скасувати
+                    </Button>
+                  </>
+                )}
               </li>
             ))}
           </ul>
         </>
       )}
+      {cancel.isSuccess && (
+        <Notice tone="ok">
+          <p>Заплановану активацію скасовано.</p>
+        </Notice>
+      )}
+      <LostSubstitutions warnings={cancel.data?.warnings} />
+
+      <Modal
+        open={!!confirm}
+        onClose={() => setConfirm(null)}
+        title={confirm ? `Скасувати перехід на розклад тривог з ${formatDate(confirm.from)}?` : ''}
+      >
+        <p>
+          Звичайний розклад діятиме й далі. Погоджені заміни на розкладі тривог у ці дати втратять
+          силу.
+        </p>
+        {cancel.error && <ProblemNotice error={cancel.error} />}
+        <ModalActions>
+          <Button onClick={() => setConfirm(null)}>Не скасовувати</Button>
+          <Button
+            variant="danger"
+            disabled={cancel.isPending}
+            onClick={() => confirm && cancelOnce(confirm)}
+          >
+            Скасувати активацію
+          </Button>
+        </ModalActions>
+      </Modal>
 
       {locked ? (
         <p className="muted">
           Поки є чинна або майбутня активація, перебудувати план і змінити дзвінки тривог не можна.
+          {future.length > 0 && ' Заплановану активацію можна скасувати до її початку.'}
         </p>
       ) : (
         <Stack>
+          <AlertBells approved={plan.state === 'approved'} />
           <BuildAlert />
           {plan.state === 'draft' && plan.timetable_id && <ApproveAlert />}
           {plan.state === 'approved' && <ActivateAlert />}
@@ -188,7 +250,14 @@ function BuildAlert() {
       {running && job.data && <Spinner label={JOB_STATE_LABEL[job.data.state]} />}
       {job.data && isTerminal(job.data) && job.data.state !== 'done' && (
         <Notice tone="bad">
-          <p>{JOB_STATE_LABEL[job.data.state]}</p>
+          <p>
+            <b>{JOB_STATE_LABEL[job.data.state]}.</b>{' '}
+            {jobErrorText(job.data.error) ??
+              (job.data.state === 'infeasible'
+                ? 'За поточних даних закладу розклад тривог скласти неможливо.'
+                : '')}
+          </p>
+          {!!job.data.conflicts?.length && <ConflictList conflicts={job.data.conflicts} />}
         </Notice>
       )}
       {job.error && (
@@ -208,7 +277,12 @@ function ApproveAlert() {
   const invalidate = useInvalidatePlan();
   const [form, setForm] = useState({ order_no: '', order_date: todayKyiv(), approved_by: '' });
   const approve = useMutation({
-    mutationFn: () => timetableApi.alertApprove(form),
+    mutationFn: () =>
+      timetableApi.alertApprove({
+        ...form,
+        order_no: form.order_no.trim(),
+        approved_by: form.approved_by.trim(),
+      }),
     onSuccess: invalidate,
   });
   const submit = (e: FormEvent) => {
@@ -223,6 +297,8 @@ function ApproveAlert() {
           <input
             id={id}
             required
+            pattern={NON_BLANK}
+            title="Вкажіть номер наказу"
             value={form.order_no}
             onChange={(e) => setForm({ ...form, order_no: e.target.value })}
           />
@@ -244,6 +320,8 @@ function ApproveAlert() {
           <input
             id={id}
             required
+            pattern={NON_BLANK}
+            title="Вкажіть, хто затвердив"
             value={form.approved_by}
             onChange={(e) => setForm({ ...form, approved_by: e.target.value })}
           />
@@ -277,12 +355,13 @@ function ActivateAlert() {
     mutationFn: () => timetableApi.alertActivate(from),
     onSuccess: invalidate,
   });
+  const activateOnce = useSingleFlight(activate);
   return (
     <form
       className={s.inline}
       onSubmit={(e) => {
         e.preventDefault();
-        activate.mutate();
+        activateOnce();
       }}
     >
       <h4>Перейти на розклад тривог</h4>
@@ -304,6 +383,9 @@ function ActivateAlert() {
             Дані закладу змінилися, і план тривог їм уже не відповідає (ліміт моделі 1.2).
             Перебудуйте план.
           </p>
+          {activate.error.conflicts.length > 0 && (
+            <ConflictList conflicts={activate.error.conflicts} />
+          )}
         </Notice>
       ) : (
         activate.error && <ProblemNotice error={activate.error} />
@@ -326,12 +408,14 @@ function EndActivation({ activationId, from }: { activationId: string; from: str
     mutationFn: () => timetableApi.alertEnd(activationId, date),
     onSuccess: invalidate,
   });
+  // :end не ідемпотентний: повтор з тією ж датою пише в журнал ще один alert_plan_ended
+  const endOnce = useSingleFlight(end);
   return (
     <form
       className={s.inline}
       onSubmit={(e) => {
         e.preventDefault();
-        end.mutate();
+        endOnce();
       }}
     >
       <h4>Повернути звичайний</h4>
@@ -350,11 +434,60 @@ function EndActivation({ activationId, from }: { activationId: string; from: str
       {end.error && <ProblemNotice error={end.error} />}
       <LostSubstitutions warnings={end.data?.warnings} />
       <div>
-        <Button type="submit" variant="primary" disabled={end.isPending}>
+        <Button type="submit" variant="primary" disabled={end.isPending || end.isSuccess}>
           Повернути звичайний розклад
         </Button>
       </div>
     </form>
+  );
+}
+
+function ConflictList({ conflicts }: { conflicts: Conflict[] }) {
+  const names = useConflictNames();
+  return (
+    <ul>
+      {conflicts.map((c, i) => (
+        <li key={i}>{describeConflict(c, names)}</li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Дзвінки тривог (модель 1.2) — укладач вводить вручну: PUT /alert-plan/bells. Без них побудова
+ * плану тривог відповідає 422 profile_incomplete. Збереження повертає погоджений план у draft.
+ */
+function AlertBells({ approved }: { approved: boolean }) {
+  const qc = useQueryClient();
+  const plan = useQuery({ queryKey: ['alert-plan'], queryFn: timetableApi.alertPlan });
+  const profile = useQuery({ queryKey: ['profile'], queryFn: schoolApi.getProfile });
+  const save = useMutation({
+    mutationFn: timetableApi.putAlertBells,
+    onSuccess: (bells) => {
+      qc.setQueryData<AlertPlan>(['alert-plan'], (p) => p && { ...p, bells });
+      void qc.invalidateQueries({ queryKey: ['alert-plan'] }); // стан плану міг стати draft
+    },
+  });
+  if (!plan.data || profile.isPending) return <Spinner />;
+  const bells = plan.data.bells;
+  const count = bells.length || Math.min(profile.data?.lessons_per_day ?? 1, MAX_BELLS);
+  return (
+    <div className={s.inline}>
+      <h4>Дзвінки тривог</h4>
+      {!bells.length && (
+        <p className="muted">Задайте дзвінки розкладу тривог — без них план 1.2 не побудувати.</p>
+      )}
+      {approved && <p className="muted">Зміна дзвінків поверне погоджений план у чернетку.</p>}
+      <BellsForm
+        key={`${plan.dataUpdatedAt}-${count}`}
+        bells={bells}
+        count={count}
+        save={save}
+        resizable
+        saveLabel="Зберегти дзвінки тривог"
+        savedText="Дзвінки тривог збережено. Перебудуйте й погодьте план тривог."
+      />
+    </div>
   );
 }
 

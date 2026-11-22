@@ -4,6 +4,7 @@ import type {
   AlertHours,
   AlertPlan,
   AuditEntry,
+  Bell,
   Conflict,
   CurriculumRow,
   Day,
@@ -132,17 +133,23 @@ function alertHoursView(from: string, to: string): AlertHours {
   };
 }
 
-// журнал дій (без прізвищ — «Вчитель #N»)
+// журнал дій (без прізвищ — «Вчитель #N»); коди дій і ключі details — як у сервісах (recordAudit),
+// переклад робить web (src/lib/audit.ts)
 const auditLog: AuditEntry[] = [
-  ['2026-08-25T10:00:00Z', 'Опубліковано розклад', null, { наказ: '97-о', 'діє з': '01.09' }],
-  ['2026-09-28T12:10:00Z', 'Погоджено розклад тривог', null, { наказ: '112-о' }],
-  ['2026-10-20T08:40:00Z', 'Змінено дані вчителя', 'Вчитель #5', { поле: 'ліміт годин' }],
   [
-    '2026-10-27T09:05:00Z',
-    'Перевипущено QR-код',
-    'Вчитель #7',
-    { примітка: 'старий код недійсний' },
+    '2026-08-25T10:00:00Z',
+    'timetable_published',
+    null,
+    { order_no: '97-о', order_date: '2026-08-25', effective_from: '2026-09-01' },
   ],
+  [
+    '2026-09-28T12:10:00Z',
+    'alert_plan_approved',
+    null,
+    { order_no: '112-о', order_date: '2026-09-28' },
+  ],
+  ['2026-10-20T08:40:00Z', 'teacher_updated', 'Вчитель #5', { fields: ['weekly_limit'] }],
+  ['2026-10-27T09:05:00Z', 'qr_rotated', 'Вчитель #7', { scope: 'teacher', generation: 2 }],
 ].map(([at, action, target, details], i) => ({
   entry_id: `a${i + 1}`,
   at: at as string,
@@ -349,9 +356,11 @@ function createAbsence(body: {
     });
     return id;
   });
-  audit('Внесено відсутність', `Вчитель #${t.teacher_no}`, {
-    дати: `${formatDate(a.date_from)}–${formatDate(a.date_to)}`,
-    задач: job_ids.length,
+  audit('absence_recorded', `Вчитель #${t.teacher_no}`, {
+    absence_id: a.absence_id,
+    date_from: a.date_from,
+    date_to: a.date_to,
+    jobs: job_ids.length,
   });
   return json(202, { absence_id: a.absence_id, job_ids });
 }
@@ -422,9 +431,10 @@ function approveSubstitution(jobId: string, cancel: { class_id: string; lesson_n
     p.state = 'approved';
   }
   const t = d.teachers.find((x) => x.teacher_id === own[0]!.original_teacher_id);
-  audit('Погоджено заміну', t ? `Вчитель #${t.teacher_no}` : null, {
-    дата: formatDate(date),
-    уроків: own.length,
+  audit('substitution_approved', t ? `Вчитель #${t.teacher_no}` : null, {
+    job_id: jobId,
+    date,
+    lessons: own.length,
   });
   return json(
     200,
@@ -534,11 +544,26 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
 
   // ── school ──
   if (path === '/school/school' && method === 'PUT') {
+    // межі схеми ProfilePatch у school-service; помилку схеми fastify/AJV віддає англійською
+    const limits: Record<string, number> = {
+      shelter_capacity: 100_000,
+      non_teaching_staff: 10_000,
+      shelter_seats: 100_000,
+      lessons_per_day: 10,
+    };
+    for (const [k, max] of Object.entries(limits)) {
+      const v = (body as Record<string, unknown>)[k];
+      if (typeof v === 'number' && v > max) {
+        return problem(400, 'validation_failed', 'Bad Request', {
+          detail: `body/${k} must be <= ${max}`,
+        });
+      }
+    }
     Object.assign(d.profile, body, { name: d.profile.name });
     d.profile.snapshot_version++;
     for (const v of versions.values())
       if (v.state === 'validated') v.data_changed_since_build = true;
-    audit('Змінено профіль закладу', null, body);
+    audit('profile_updated', null, { fields: Object.keys(body) });
     return json(200, d.profile);
   }
   if (path === '/school/school') return json(200, d.profile);
@@ -548,16 +573,20 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
       (b, i) =>
         b.lesson_no !== i + 1 || !(b.start < b.end) || (i > 0 && b.start < list[i - 1]!.end),
     );
-    if (bad) return problem(422, 'bells_invalid', 'Дзвінки перетинаються або йдуть не по черзі');
+    if (bad) {
+      return problem(400, 'validation_failed', 'Некоректні дзвінки', {
+        detail: 'Дзвінки перетинаються або йдуть не по черзі',
+      });
+    }
     d.bells.splice(0, d.bells.length, ...list);
-    dataChanged('Змінено дзвінки', null, { уроків: list.length });
+    dataChanged('bells_replaced', null, { lessons: list.length });
     return json(200, d.bells);
   }
   if (path === '/school/bells') return json(200, d.bells);
   if (path === '/school/classes' && method === 'POST') {
     const c = { class_id: `c${Date.now()}`, ...body, archived_at: null };
     d.classes.push(c);
-    dataChanged(`Додано клас`, c.name);
+    dataChanged('class_created', c.name);
     return json(201, c);
   }
   if ((m = path.match(/^\/school\/classes\/([^/]+)$/))) {
@@ -565,12 +594,12 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     if (!c) return notFound();
     if (method === 'PUT') {
       Object.assign(c, body);
-      dataChanged('Змінено клас', c.name);
+      dataChanged('class_updated', c.name);
       return json(200, c);
     }
     if (method === 'DELETE') {
       c.archived_at = new Date().toISOString();
-      dataChanged('Архівовано клас', c.name, { QR: 'відкликано' });
+      dataChanged('class_archived', c.name);
       return new Response(null, { status: 204 });
     }
   }
@@ -579,7 +608,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
   if (path === '/school/subjects' && method === 'POST') {
     const x = { subject_id: `s${Date.now()}`, ...body, archived_at: null };
     d.subjects.push(x);
-    dataChanged('Додано предмет', x.name);
+    dataChanged('subject_created', x.name);
     return json(201, x);
   }
   if ((m = path.match(/^\/school\/subjects\/([^/]+)$/))) {
@@ -587,7 +616,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     if (!x) return notFound();
     if (method === 'PUT') {
       Object.assign(x, body);
-      dataChanged('Змінено предмет', x.name);
+      dataChanged('subject_updated', x.name);
       return json(200, x);
     }
     if (method === 'DELETE') {
@@ -595,7 +624,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
         return problem(409, 'in_curriculum', 'Предмет є в навчальному плані');
       }
       x.archived_at = new Date().toISOString();
-      dataChanged('Архівовано предмет', x.name);
+      dataChanged('subject_archived', x.name);
       return new Response(null, { status: 204 });
     }
   }
@@ -621,7 +650,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     const ids = new Set(absenceView(a).jobs.map((j) => j.job_id));
     for (const x of subs) if (ids.has(x.job_id)) x.state = 'rejected';
     const t = d.teachers.find((x) => x.teacher_id === a.teacher_id);
-    audit('Скасовано відсутність', t ? `Вчитель #${t.teacher_no}` : null);
+    audit('absence_cancelled', t ? `Вчитель #${t.teacher_no}` : null);
     return json(200, { cancelled: true });
   }
   if (path === '/timetable/substitutions' && method === 'GET') {
@@ -644,7 +673,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     if (!j || j.kind !== 'substitution')
       return problem(404, 'not_found', 'Задачу заміни не знайдено');
     for (const x of subs) if (x.job_id === m[1] && x.state === 'proposed') x.state = 'rejected';
-    audit('Відхилено пропозицію заміни', null, { дата: formatDate(j.date!) });
+    audit('substitution_rejected', null, { date: j.date! });
     return json(
       200,
       subs.filter((x) => x.job_id === m![1]),
@@ -654,10 +683,22 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
   if (path === '/timetable/holidays' && method === 'GET') return json(200, holidays);
   if (path === '/timetable/holidays' && method === 'PUT') {
     const { holiday_from: f, holiday_to: t } = body as typeof holidays;
-    if (!f !== !t) return problem(422, 'holidays_pair', 'Вкажіть обидві дати або жодної');
-    if (f && t && f > t) return problem(422, 'holidays_order', 'Дата «з» пізніша за «по»');
+    if (!f !== !t) {
+      return problem(422, 'invalid_date', 'Некоректні канікули', {
+        detail: 'Задайте обидві дати або жодної',
+      });
+    }
+    if (f && t && f > t) {
+      return problem(422, 'invalid_date', 'Некоректні канікули', {
+        detail: 'holiday_from пізніше за holiday_to',
+      });
+    }
     Object.assign(holidays, { holiday_from: f, holiday_to: t });
-    audit(f ? 'Задано канікули' : 'Прибрано канікули', null, f ? { з: f, по: t } : {});
+    audit(
+      f ? 'holidays_set' : 'holidays_cleared',
+      null,
+      f ? { holiday_from: f, holiday_to: t } : {},
+    );
     return json(200, holidays);
   }
   // ── вчителі: підпис, ліміт, недоступні дні; етап 2 — видалення (ст. 15) і експорт (ст. 8) ──
@@ -668,7 +709,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     const no = Math.max(0, ...d.teachers.map((t) => t.teacher_no)) + 1;
     const t = { teacher_id: `t${Date.now()}`, teacher_no: no, ...body, deleted_at: null };
     d.teachers.push(t);
-    dataChanged('Додано вчителя', `Вчитель #${no}`, { QR: 'видано' });
+    dataChanged('teacher_created', `Вчитель #${no}`);
     return json(201, t);
   }
   if ((m = path.match(/^\/(school|timetable)\/teachers\/([^/]+)\/export$/))) {
@@ -676,7 +717,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     if (!t) return notFound();
     const ref = `Вчитель #${t.teacher_no}`;
     if (m[1] === 'school') {
-      audit('Експортовано дані вчителя', ref, { підстава: 'запит особи (ст. 8)' });
+      audit('teacher_exported', ref);
       return json(200, {
         teacher_id: t.teacher_id,
         teacher_no: t.teacher_no,
@@ -716,7 +757,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
         return problem(409, 'label_taken', 'Підпис має бути унікальним');
       }
       Object.assign(t, body);
-      dataChanged('Змінено дані вчителя', `Вчитель #${t.teacher_no}`);
+      dataChanged('teacher_updated', `Вчитель #${t.teacher_no}`);
       return json(200, t);
     }
     if (method === 'DELETE') {
@@ -729,7 +770,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
       // timetable ставить «Вчитель #N» у копіях підписів у версіях (school.data.changed)
       for (const v of versions.values())
         for (const x of v.teachers) if (x.teacher_id === t.teacher_id) x.label = ref;
-      dataChanged('Видалено дані вчителя', ref, { QR: 'відкликано' });
+      dataChanged('teacher_deleted', ref);
       return new Response(null, { status: 204 });
     }
   }
@@ -751,7 +792,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
         'Рядок плану з невідомим класом, предметом чи вчителем',
       );
     d.plan.splice(0, d.plan.length, ...rows);
-    dataChanged('Змінено навчальний план', null, { рядків: rows.length });
+    dataChanged('curriculum_replaced', null, { rows: rows.length });
     return json(200, d.plan);
   }
   if (path === '/school/curriculum') return json(200, d.plan);
@@ -768,8 +809,39 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
 
   // ── розклад тривог ──
   if (path === '/timetable/alert-plan' && method === 'GET') return json(200, alertPlan);
+  if (path === '/timetable/alert-plan/bells' && method === 'GET') return json(200, alertPlan.bells);
+  if (path === '/timetable/alert-plan/bells' && method === 'PUT') {
+    // як putAlertBells у timetable-service: № 1..N без пропусків, 400 validation_failed, план → draft
+    const list = [...(body as Bell[])].sort((a, b) => a.lesson_no - b.lesson_no);
+    if (list.length > 10) return problem(400, 'validation_failed', 'Некоректні дзвінки тривог');
+    for (const [i, b] of list.entries()) {
+      const prev = list[i - 1];
+      if (b.lesson_no !== i + 1 || b.start >= b.end || (prev && b.start < prev.end)) {
+        return problem(400, 'validation_failed', 'Некоректні дзвінки тривог', {
+          detail: `Урок №${b.lesson_no}: перевірте порядок і час`,
+        });
+      }
+    }
+    if (alertLocked()) {
+      return problem(409, 'alert_plan_active', 'Розклад тривог діє за наказом', {
+        detail: 'Поки є чинна або майбутня активація, дзвінки не змінюються',
+      });
+    }
+    alertPlan.bells = list;
+    if (alertPlan.state === 'approved') {
+      alertPlan.state = 'draft';
+      alertPlan.order = null;
+    }
+    return json(200, alertPlan.bells);
+  }
   if (path === '/timetable/alert-plan:build' && method === 'POST') {
     if (alertLocked()) return problem(409, 'alert_plan_active', 'Діє активація розкладу тривог');
+    if (alertPlan.bells.length === 0) {
+      return problem(422, 'profile_incomplete', 'Профіль закладу неповний', {
+        detail: 'Заповніть: alert_bells',
+        fields: ['alert_bells'],
+      });
+    }
     const busy = activeBuild();
     if (busy) return problem(409, 'build_in_progress', 'Побудова вже йде', { job_id: busy });
     const id = crypto.randomUUID();
@@ -780,34 +852,49 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     if (activeBuild('build_alert')) return problem(409, 'build_in_progress', 'Побудова вже йде');
     alertPlan.state = 'approved';
     alertPlan.order = body;
-    audit('Погоджено розклад тривог', null, { наказ: body.order_no });
+    audit('alert_plan_approved', null, { order_no: body.order_no, order_date: body.order_date });
     return json(200, alertPlan);
   }
   if (path === '/timetable/alert-plan:activate' && method === 'POST') {
-    if (alertPlan.state !== 'approved') return problem(409, 'not_approved', 'План не погоджено');
+    if (alertPlan.state !== 'approved') {
+      return problem(409, 'alert_plan_not_approved', 'План тривог не погоджено');
+    }
     if (body.from < todayKyiv()) return problem(422, 'invalid_date', 'Дата раніше сьогодні');
     const overlaps = alertPlan.activations.some((a) => !a.to || a.to > body.from);
-    if (overlaps) return problem(409, 'overlap', 'Перетин з іншою активацією');
+    if (overlaps) return problem(409, 'activation_overlap', 'Перетин з іншою активацією');
     alertPlan.activations.push({ activation_id: crypto.randomUUID(), from: body.from, to: null });
-    audit('Активовано розклад тривог', null, { з: body.from });
+    audit('alert_plan_activated', null, { from: body.from });
     return json(200, {
       warnings: { lost_substitutions: lostFrom(body.from, alertPlan.timetable_id ?? '') },
     });
   }
   if ((m = path.match(/^\/timetable\/alert-plan\/activations\/([^/:]+):end$/))) {
+    // як endActivation у timetable-service: ще не чинну активацію скасовуємо (дату не перевіряємо)
     const a = alertPlan.activations.find((x) => x.activation_id === m![1]);
     if (!a) return notFound();
-    if (body.from <= a.from || body.from < todayKyiv()) {
+    const today = todayKyiv();
+    if (a.to && a.to <= today)
+      return problem(409, 'validation_failed', 'Активація вже завершилась');
+    const id = a.activation_id;
+    if (a.from > today) {
+      alertPlan.activations.splice(alertPlan.activations.indexOf(a), 1);
+      audit('alert_plan_activation_cancelled', null, { from: a.from });
+      return json(200, {
+        activation_id: id,
+        cancelled: true,
+        warnings: { lost_substitutions: [] },
+      });
+    }
+    if (body.from <= a.from || body.from < today) {
       return problem(
         422,
         'invalid_date',
         'Дата повернення має бути пізніша за початок і не раніше сьогодні',
       );
     }
-    if (a.from > todayKyiv()) alertPlan.activations.splice(alertPlan.activations.indexOf(a), 1);
-    else a.to = body.from;
-    audit('Повернуто звичайний розклад', null, { з: body.from });
-    return json(200, { warnings: { lost_substitutions: [] } });
+    a.to = body.from;
+    audit('alert_plan_ended', null, { from: body.from });
+    return json(200, { activation_id: id, cancelled: false, warnings: { lost_substitutions: [] } });
   }
   if (path === '/timetable/alert-hours' && method === 'GET') {
     const from = url.searchParams.get('from')!;
@@ -866,9 +953,10 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     tt.state = 'published';
     tt.effective_from = req.effective_from;
     tt.published_at = new Date().toISOString();
-    audit('Опубліковано розклад', null, {
-      наказ: req.order_no,
-      'діє з': formatDate(req.effective_from),
+    audit('timetable_published', null, {
+      order_no: req.order_no,
+      order_date: req.order_date,
+      effective_from: req.effective_from,
     });
     return json(200, { timetable: d.summary(tt), warnings: { lost_substitutions: lost } });
   }
@@ -942,7 +1030,7 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
   }
   if ((m = path.match(/^\/timetable\/access-tokens\/([^/:]+):rotate$/)) && method === 'POST') {
     const t = d.rotate(m[1]!);
-    if (t) audit('Перевипущено QR-код', t.target_label, { примітка: 'старий код недійсний' });
+    if (t) audit('qr_rotated', t.target_label, { scope: t.scope });
     return t ? json(200, t) : notFound();
   }
 

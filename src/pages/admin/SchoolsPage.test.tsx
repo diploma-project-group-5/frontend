@@ -48,6 +48,10 @@ describe('Заклади (системний адмін)', () => {
     const done = within(await screen.findByRole('dialog', { name: 'Заклад зареєстровано' }));
     expect(done.getByLabelText('Логін')).toHaveValue('gymn3');
     expect((done.getByLabelText('Тимчасовий пароль') as HTMLInputElement).value).not.toBe('');
+    // Esc не закриває вікно: пароль показується лише раз
+    const esc = new Event('cancel', { cancelable: true });
+    screen.getByRole('dialog', { name: 'Заклад зареєстровано' }).dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(true);
     await user.click(done.getByRole('button', { name: 'Готово' }));
     expect(screen.queryByLabelText('Тимчасовий пароль')).not.toBeInTheDocument();
 

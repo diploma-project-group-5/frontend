@@ -7,6 +7,7 @@ import {
 import { useState, type FormEvent } from 'react';
 import { schoolApi } from '@/api/endpoints';
 import type { Bell } from '@/api/types';
+import { useUnsavedChanges } from '@/lib/unsaved';
 import { Button, Card, ProblemNotice, Spinner } from '@/ui';
 import s from './DataPages.module.css';
 
@@ -59,14 +60,27 @@ function validate(rows: Row[]) {
   return errors;
 }
 
-function BellsForm({
+/** Дзвінків тривог (PUT /alert-plan/bells) — не більше 10, як і уроків у дні. */
+export const MAX_BELLS = 10;
+
+/**
+ * Таблиця дзвінків «№ → початок, кінець». Основні дзвінки мають стільки рядків, скільки «Уроків на
+ * день»; дзвінки тривог (resizable) — скільки задасть укладач: «Додати урок» / «Прибрати останній».
+ */
+export function BellsForm({
   bells,
   count,
   save,
+  resizable = false,
+  saveLabel = 'Зберегти дзвінки',
+  savedText = 'Збережено. Сторінки за QR показують час за чинними дзвінками.',
 }: {
   bells: Bell[];
   count: number;
   save: UseMutationResult<Bell[], unknown, Bell[]>;
+  resizable?: boolean;
+  saveLabel?: string;
+  savedText?: string;
 }) {
   const initial: Row[] = Array.from({ length: count }, (_, i) => {
     const b = bells.find((x) => x.lesson_no === i + 1);
@@ -75,10 +89,17 @@ function BellsForm({
   const [rows, setRows] = useState(initial);
   const [shown, setShown] = useState(false); // помилки показуємо після першої спроби зберегти
 
-  const dirty =
-    rows.some((r, i) => r.start !== initial[i]!.start || r.end !== initial[i]!.end) ||
-    bells.length !== count;
+  // edited — зміни укладача (від них і попередження при виході); dirty — є що зберігати
+  const edited =
+    rows.length !== initial.length ||
+    rows.some((r, i) => r.start !== initial[i]!.start || r.end !== initial[i]!.end);
+  const dirty = edited || (!resizable && bells.length !== count);
+  useUnsavedChanges(edited, { title: 'Дзвінки не збережено' });
   const errors = validate(rows);
+  const resize = (n: number) => {
+    save.reset();
+    setRows(n > rows.length ? [...rows, { start: '', end: '' }] : rows.slice(0, n));
+  };
 
   const set = (i: number, patch: Partial<Row>) => {
     save.reset();
@@ -136,7 +157,25 @@ function BellsForm({
           })}
         </tbody>
       </table>
-      {bells.length !== count && (
+      {resizable && (
+        <div className={s.saveActs}>
+          <Button
+            size="sm"
+            disabled={rows.length >= MAX_BELLS || save.isPending}
+            onClick={() => resize(rows.length + 1)}
+          >
+            Додати урок
+          </Button>
+          <Button
+            size="sm"
+            disabled={rows.length <= 1 || save.isPending}
+            onClick={() => resize(rows.length - 1)}
+          >
+            Прибрати останній
+          </Button>
+        </div>
+      )}
+      {!resizable && bells.length !== count && (
         <p className="muted">
           Рядків — як «Уроків на день» ({count}); збереження{' '}
           {bells.length > count ? 'прибере' : 'додасть'} дзвінки, щоб кількість збігалася.
@@ -150,7 +189,7 @@ function BellsForm({
       {save.isError && <ProblemNotice error={save.error} />}
       {save.isSuccess && !dirty && (
         <p className="muted" role="status">
-          Збережено. Сторінки за QR показують час за чинними дзвінками.
+          {savedText}
         </p>
       )}
       <div className={s.saveActs}>
@@ -166,7 +205,7 @@ function BellsForm({
           Скасувати
         </Button>
         <Button type="submit" size="sm" variant="primary" disabled={!dirty || save.isPending}>
-          Зберегти дзвінки
+          {saveLabel}
         </Button>
       </div>
     </form>

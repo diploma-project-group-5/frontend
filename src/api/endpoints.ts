@@ -103,12 +103,19 @@ export const timetableApi = {
 
   alertPlan: () => api.get<AlertPlan>('/timetable/alert-plan'),
   alertBuild: () => api.post<JobAccepted>('/timetable/alert-plan:build'),
+  /**
+   * Дзвінки тривог № 1..N (до 10) — укладач вводить вручну; без них :build плану 1.2 → 422
+   * profile_incomplete (alert_bells). Повертає план у draft; 409 alert_plan_active, поки є чинна
+   * або майбутня активація.
+   */
+  putAlertBells: (bells: Bell[]) => api.put<Bell[]>('/timetable/alert-plan/bells', bells),
   alertApprove: (body: { order_no: string; order_date: string; approved_by: string }) =>
     api.post<AlertPlan>('/timetable/alert-plan:approve', body),
   alertActivate: (from: string) =>
     api.post<{ warnings: Warnings }>('/timetable/alert-plan:activate', { from }),
+  /** Чинна активація — повернення звичайного з дати `from`; ще не чинна — скасування (cancelled). */
   alertEnd: (activationId: string, from: string) =>
-    api.post<{ warnings: Warnings }>(
+    api.post<{ activation_id: string; cancelled: boolean; warnings: Warnings }>(
       `/timetable/alert-plan/activations/${encodeURIComponent(activationId)}:end`,
       { from },
     ),
