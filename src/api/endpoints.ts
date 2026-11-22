@@ -113,9 +113,12 @@ export const timetableApi = {
     api.post<AlertPlan>('/timetable/alert-plan:approve', body),
   alertActivate: (from: string) =>
     api.post<{ warnings: Warnings }>('/timetable/alert-plan:activate', { from }),
-  /** Чинна активація — повернення звичайного з дати `from`; ще не чинна — скасування (cancelled). */
+  /**
+   * Повернення звичайного з дати `from` (і для ще не чинної активації): from > початку, ≥ сьогодні,
+   * ≤ заданого кінця; повтор з тією ж датою — 200 без змін; завершена — 409 activation_ended.
+   */
   alertEnd: (activationId: string, from: string) =>
-    api.post<{ activation_id: string; cancelled: boolean; warnings: Warnings }>(
+    api.post<{ activation_id: string; warnings: Warnings }>(
       `/timetable/alert-plan/activations/${encodeURIComponent(activationId)}:end`,
       { from },
     ),

@@ -9,7 +9,7 @@ describe('журнал: переклад кодів', () => {
 
   it('details: підписи ключів, поля профілю, дати й вкладені об’єкти', () => {
     expect(formatAuditDetails({ fields: ['shelter_capacity', 'saturday'] })).toBe(
-      'поля: місткість укриття, субота',
+      'поля: паспортна місткість укриття, субота',
     );
     expect(formatAuditDetails({ order_no: '', order_date: '2026-11-19' })).toBe(
       'наказ №: —; дата наказу: 19.11.2026',

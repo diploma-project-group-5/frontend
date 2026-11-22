@@ -4,9 +4,9 @@ import { useSearchParams } from 'react-router';
 import { schoolApi, timetableApi } from '@/api/endpoints';
 import { isApiError } from '@/api/http';
 import type { Absence, AbsenceAccepted, Bell, Lesson, Substitution } from '@/api/types';
-import { isTerminal, JOB_STATE_LABEL } from '@/api/useJob';
+import { isTerminal, JOB_STATE_LABEL, jobErrorText } from '@/api/useJob';
 import { config } from '@/config';
-import { conflictNames, type ConflictNames } from '@/lib/conflicts';
+import { conflictNames, describeConflict, type ConflictNames } from '@/lib/conflicts';
 import {
   groupState,
   isLost,
@@ -390,9 +390,10 @@ function NewAbsence({ onCreated }: { onCreated: (res: AbsenceAccepted) => void }
             {isApiError(create.error, 'teacher_is_substitute') ? (
               <Notice tone="bad">
                 <p>
-                  Цей вчитель уже погоджений замінником у ці дні й уроки. Спершу відхиліть ту заміну
-                  або скасуйте відсутність, для якої його призначено.
+                  Цей вчитель уже погоджений замінником у ці дні й уроки. Спершу скасуйте
+                  відсутність, для якої його призначено, або внесіть відсутність без цих уроків.
                 </p>
+                <CoveringLessons lessons={create.error.body.lessons} names={ctx.names} />
               </Notice>
             ) : (
               create.error && <ProblemNotice error={create.error} />
@@ -512,16 +513,19 @@ const key = (r: Pick<Substitution, 'class_id' | 'lesson_no'>) => `${r.class_id}|
 function JobGroup({ job, ctx }: { job: Absence['jobs'][number]; ctx: Ctx }) {
   const qc = useQueryClient();
   const done = job.state === 'done';
+  // rejected: validator-lib знайшов нові конфлікти — пропозиції збережено як відхилені (RQ4), їх видно
+  const rejected = job.state === 'rejected';
+  const hasRows = done || rejected;
   const subs = useQuery({
     queryKey: ['substitutions', job.date],
     queryFn: () => timetableApi.substitutions(job.date),
-    enabled: done,
+    enabled: hasRows,
   });
   const rows = (subs.data ?? [])
     .filter((r) => r.job_id === job.job_id)
     .sort((a, b) => a.lesson_no - b.lesson_no);
   const [cancelled, setCancelled] = useState<Set<string>>(new Set());
-  // для збою — код з GET /jobs/{id} (поле error), щоб пояснити його людськими словами
+  // для збою й відмови — код і conflicts з GET /jobs/{id}, щоб пояснити їх людськими словами
   const failed = !done && isTerminal(job);
   const details = useQuery({
     queryKey: ['job', job.job_id],
@@ -574,17 +578,38 @@ function JobGroup({ job, ctx }: { job: Absence['jobs'][number]; ctx: Ctx }) {
         </span>
       </header>
 
-      {!done ? (
+      {rejected && (
+        <div className={s.sbody}>
+          <Notice tone="bad">
+            <p>
+              Перевірка не прийняла пропозиції солвера
+              {details.data?.conflicts?.length ? ':' : '.'}
+            </p>
+            {!!details.data?.conflicts?.length && (
+              <ul>
+                {details.data.conflicts.map((c, i) => (
+                  <li key={i}>{describeConflict(c, ctx.names)}</li>
+                ))}
+              </ul>
+            )}
+            <p>
+              Погодити їх не можна. Скасуйте відсутність і внесіть її знову або замініть вручну.
+            </p>
+          </Notice>
+        </div>
+      )}
+      {!hasRows ? (
         <div className={s.sbody}>
           {failed ? (
             details.data?.error === 'unsupported_job_type' ? (
               <p role="status">
-                Автоматичний підбір замін з’явиться на етапі 2. Поки що призначте заміну вручну.
+                Солвер на сервері ще не підбирає заміни (версія до 0.4.0). Поки що призначте заміну
+                вручну.
               </p>
             ) : (
               <p role="status">
-                Пропозицій немає: задача завершилась зі станом «{JOB_STATE_LABEL[job.state]}».
-                Скасуйте відсутність і внесіть її знову пізніше.
+                Пропозицій немає: задача завершилась зі станом «{JOB_STATE_LABEL[job.state]}».{' '}
+                {jobErrorText(details.data?.error)} Скасуйте відсутність і внесіть її знову пізніше.
               </p>
             )
           ) : (
@@ -654,7 +679,7 @@ function JobGroup({ job, ctx }: { job: Absence['jobs'][number]; ctx: Ctx }) {
               Видно на сторінках за QR: у класу урок позначено «Заміна».
             </p>
           )}
-          {state === 'rejected' && (
+          {state === 'rejected' && !rejected && (
             <p className={`${s.note} muted`}>
               Відхилену пропозицію збережено для оцінювання якості замін.
             </p>
@@ -762,6 +787,24 @@ function SubstitutionRow({
   );
 }
 
+/** 409 teacher_is_substitute: уроки, де вчитель уже погоджений замінником (lessons[] у відповіді). */
+function CoveringLessons({ lessons, names }: { lessons: unknown; names: ConflictNames }) {
+  const list = Array.isArray(lessons)
+    ? (lessons as { date?: string; class_id?: string; lesson_no?: number }[])
+    : [];
+  if (!list.length) return null;
+  return (
+    <ul>
+      {list.map((l, i) => (
+        <li key={i}>
+          {l.date ? `${dayTitle(l.date)}, ` : ''}
+          {label(names, 'classes', l.class_id ?? null)}, урок {l.lesson_no}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** Відмови :approve / :reject людськими словами (коди — README timetable-service). */
 function DecisionError({ error }: { error: unknown }) {
   if (isApiError(error, 'stale'))
@@ -782,7 +825,10 @@ function DecisionError({ error }: { error: unknown }) {
   if (isApiError(error, 'date_passed'))
     return (
       <Notice tone="bad">
-        <p>Дата заміни вже минула — погодити її не можна. Відхиліть пропозицію.</p>
+        <p>
+          Дата заміни (або дата, на яку переноситься урок) уже минула — погодити її не можна.
+          Відхиліть пропозицію.
+        </p>
       </Notice>
     );
   if (isApiError(error, 'job_not_ready'))

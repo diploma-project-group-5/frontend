@@ -313,7 +313,7 @@ function createAbsence(body: {
   if (!t) return problem(422, 'teacher_not_found', 'Вчителя не знайдено');
   const lessonNos = body.lesson_nos?.length ? [...new Set(body.lesson_nos)].sort() : null;
   // timetable #6: вчитель сам погоджений замінник у ці дні й уроки
-  const substitute = subs.some(
+  const covering = subs.filter(
     (x) =>
       x.state === 'approved' &&
       x.new_teacher_id === t.teacher_id &&
@@ -321,8 +321,11 @@ function createAbsence(body: {
       x.date <= body.date_to &&
       (lessonNos === null || lessonNos.includes(x.lesson_no)),
   );
-  if (substitute)
-    return problem(409, 'teacher_is_substitute', 'Вчитель уже погоджений замінником у ці години');
+  if (covering.length)
+    return problem(409, 'teacher_is_substitute', 'Вчитель погоджений замісником', {
+      detail: 'Спершу скасуйте ці заміни',
+      lessons: covering.map(({ date, class_id, lesson_no }) => ({ date, class_id, lesson_no })),
+    });
 
   const planned = schoolDates(body.date_from, body.date_to).flatMap((date) => {
     const tt = versionAt(date);
@@ -396,7 +399,11 @@ function approveSubstitution(jobId: string, cancel: { class_id: string; lesson_n
   if (view.state !== 'done' || !own.length)
     return problem(409, 'job_not_ready', 'Немає пропозицій для погодження');
   const date = j.date!;
-  if (date < todayKyiv()) return problem(409, 'date_passed', 'Дата заміни вже минула');
+  const today = todayKyiv();
+  if (date < today || own.some((p) => p.moved_to && p.moved_to.date < today))
+    return problem(409, 'date_passed', 'Дата заміни минула', {
+      detail: 'Заміни погоджують на сьогодні або пізніше',
+    });
   if (versionAt(date)?.timetable_id !== own[0]!.timetable_id)
     return problem(409, 'stale', 'На дату діє інший розклад', {
       detail: 'Внесіть відсутність знову',
@@ -551,6 +558,17 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
       shelter_seats: 100_000,
       lessons_per_day: 10,
     };
+    // заповнене поле формули місткості не очищується в null (school-service, Z5-2)
+    const cleared = Object.keys(limits).filter(
+      (k) =>
+        (body as Record<string, unknown>)[k] === null &&
+        (d.profile as unknown as Record<string, unknown>)[k] !== null,
+    );
+    if (cleared.length) {
+      return problem(400, 'validation_failed', 'Поле не можна очистити', {
+        detail: `Вкажіть значення: ${cleared.join(', ')}`,
+      });
+    }
     for (const [k, max] of Object.entries(limits)) {
       const v = (body as Record<string, unknown>)[k];
       if (typeof v === 'number' && v > max) {
@@ -844,6 +862,9 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     }
     const busy = activeBuild();
     if (busy) return problem(409, 'build_in_progress', 'Побудова вже йде', { job_id: busy });
+    // погоджений план без активації :build повертає в draft (timetable-service, Z1-1)
+    alertPlan.state = 'draft';
+    alertPlan.order = null;
     const id = crypto.randomUUID();
     jobs.set(id, { createdAt: Date.now(), seed: ++seq, kind: 'build_alert' });
     return json(202, { job_id: id });
@@ -869,32 +890,27 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
     });
   }
   if ((m = path.match(/^\/timetable\/alert-plan\/activations\/([^/:]+):end$/))) {
-    // як endActivation у timetable-service: ще не чинну активацію скасовуємо (дату не перевіряємо)
+    // як endActivation у timetable-service: дата повернення — і для ще не чинної активації
     const a = alertPlan.activations.find((x) => x.activation_id === m![1]);
     if (!a) return notFound();
     const today = todayKyiv();
-    if (a.to && a.to <= today)
-      return problem(409, 'validation_failed', 'Активація вже завершилась');
     const id = a.activation_id;
-    if (a.from > today) {
-      alertPlan.activations.splice(alertPlan.activations.indexOf(a), 1);
-      audit('alert_plan_activation_cancelled', null, { from: a.from });
-      return json(200, {
-        activation_id: id,
-        cancelled: true,
-        warnings: { lost_substitutions: [] },
+    if (a.to && a.to === body.from) {
+      return json(200, { activation_id: id, warnings: { lost_substitutions: [] } }); // повтор
+    }
+    if (a.to && a.to <= today) {
+      return problem(409, 'activation_ended', 'Активація вже завершилась', {
+        detail: `Основний розклад діє з ${a.to}`,
       });
     }
-    if (body.from <= a.from || body.from < today) {
-      return problem(
-        422,
-        'invalid_date',
-        'Дата повернення має бути пізніша за початок і не раніше сьогодні',
-      );
+    if (body.from <= a.from || body.from < today || (a.to && body.from > a.to)) {
+      return problem(422, 'invalid_date', 'Некоректна дата повернення', {
+        detail: 'Дата повернення пізніша за початок активації і не раніше сьогодні',
+      });
     }
     a.to = body.from;
     audit('alert_plan_ended', null, { from: body.from });
-    return json(200, { activation_id: id, cancelled: false, warnings: { lost_substitutions: [] } });
+    return json(200, { activation_id: id, warnings: { lost_substitutions: [] } });
   }
   if (path === '/timetable/alert-hours' && method === 'GET') {
     const from = url.searchParams.get('from')!;

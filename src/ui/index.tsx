@@ -4,6 +4,7 @@ import { NavLink } from 'react-router';
 import { ApiError } from '@/api/http';
 import type { DayFormat } from '@/api/types';
 import { describeConflict, useCachedConflictNames } from '@/lib/conflicts';
+import { fieldLabel, humanizeFields } from '@/lib/fields';
 import s from './ui.module.css';
 
 const cx = (...c: (string | false | undefined)[]) => c.filter(Boolean).join(' ');
@@ -167,6 +168,10 @@ const CODE_TEXT: Record<string, string> = {
   alert_plan_missing: 'Шаблону розкладу тривог ще немає. Спершу побудуйте план.',
   alert_plan_not_approved: 'План тривог не погоджено. Спершу погодьте його наказом.',
   activation_overlap: 'На ці дати вже є інша активація розкладу тривог.',
+  activation_ended: 'Ця активація розкладу тривог уже завершилась.',
+  teacher_is_substitute:
+    'Цей вчитель уже погоджений замінником у ці дні й уроки. Спершу скасуйте ті заміни.',
+  date_passed: 'Дата заміни вже минула — погодити її не можна.',
 };
 
 const VALIDATION_FALLBACK =
@@ -177,7 +182,15 @@ const VALIDATION_FALLBACK =
  * схеми (fastify/AJV) — англійською з шляхами body/…; такий машинний текст укладачу не показуємо.
  */
 function validationText(detail: string | undefined) {
-  return detail && /[а-яіїєґ]/i.test(detail) ? detail : VALIDATION_FALLBACK;
+  return detail && /[а-яіїєґ]/i.test(detail) ? humanizeFields(detail) : VALIDATION_FALLBACK;
+}
+
+/** 422 profile_incomplete: які саме поля заповнити (fields у тілі відповіді). */
+function incompleteText(fields: unknown) {
+  const list = Array.isArray(fields) ? fields.filter((f) => typeof f === 'string') : [];
+  return list.length
+    ? `${CODE_TEXT.profile_incomplete} Заповніть: ${list.map(fieldLabel).join(', ')}.`
+    : CODE_TEXT.profile_incomplete;
 }
 
 export function ProblemNotice({ error }: { error: unknown }) {
@@ -187,7 +200,9 @@ export function ProblemNotice({ error }: { error: unknown }) {
     const text =
       error.code === 'validation_failed'
         ? validationText(error.detail)
-        : (error.code && CODE_TEXT[error.code]) || error.detail || error.title;
+        : error.code === 'profile_incomplete'
+          ? incompleteText(error.body.fields)
+          : (error.code && CODE_TEXT[error.code]) || error.detail || error.title;
     return (
       <Notice tone="bad">
         <p>{text}</p>
