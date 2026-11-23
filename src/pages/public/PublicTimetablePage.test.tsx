@@ -27,6 +27,7 @@ afterEach(() => {
 
 const sample: PublicTimetable = {
   state: 'published',
+  scope: 'class',
   target_label: '7-А',
   published_at: '2026-10-12T09:00:00Z',
   upcoming_change: 'З 16.11 діє новий розклад',
@@ -141,8 +142,10 @@ describe('сторінка класу за QR', () => {
   });
 
   it('токен вчителя на сторінці класу (/c) — «Посилання недійсне»', async () => {
+    // старий сервер без scope: тип видно з полів уроків
     mockFetch(200, {
       ...sample,
+      scope: undefined,
       target_label: 'Вчитель #3',
       weeks: [
         {
@@ -168,6 +171,31 @@ describe('сторінка класу за QR', () => {
     renderAt('#teacher.token.mac');
     expect(await screen.findByText(/Посилання недійсне/)).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Вчитель #3' })).not.toBeInTheDocument();
+  });
+
+  it('токен вчителя на /c без уроків (канікули): scope з відповіді — «Посилання недійсне»', async () => {
+    mockFetch(200, {
+      ...sample,
+      scope: 'teacher',
+      target_label: 'Іваненко О. П.',
+      weeks: [{ week: '2026-W45', days: [{ date: '2026-11-05', format: null, lessons: [] }] }],
+    } satisfies PublicTimetable);
+    renderAt('#teacher.token.mac');
+    expect(await screen.findByText(/Посилання недійсне/)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Іваненко О. П.' })).not.toBeInTheDocument();
+  });
+
+  it('старий сервер без scope і без уроків: тип не вгадуємо — нейтральний заголовок', async () => {
+    mockFetch(200, {
+      ...sample,
+      scope: undefined,
+      target_label: 'Іваненко О. П.',
+      weeks: [{ week: '2026-W45', days: [{ date: '2026-11-05', format: null, lessons: [] }] }],
+    } satisfies PublicTimetable);
+    renderAt('#unknown.token.mac');
+    expect(await screen.findByRole('heading', { name: 'Іваненко О. П.' })).toBeInTheDocument();
+    expect(screen.getByText('Розклад занять')).toBeInTheDocument();
+    expect(screen.queryByText('Розклад класу')).not.toBeInTheDocument();
   });
 
   it('клас, якого ще немає в опублікованому розкладі: заголовок не порожній, пояснення', async () => {

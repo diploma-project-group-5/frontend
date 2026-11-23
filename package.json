@@ -18,7 +18,9 @@
     "format:check": "prettier --check .",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test",
+    "api:surface": "node scripts/api-surface.mjs",
+    "api:surface:check": "node scripts/api-surface.mjs --check"
   },
   "dependencies": {
     "@date-fns/tz": "1.5.0",
@@ -33,7 +35,7 @@
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
-    "@lad/contracts": "https://codeload.github.com/diploma-project-group-5/contracts/tar.gz/refs/tags/v0.3.0",
+    "@lad/contracts": "https://codeload.github.com/diploma-project-group-5/contracts/tar.gz/refs/tags/v0.5.0",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.8",

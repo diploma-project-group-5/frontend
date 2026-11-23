@@ -8,6 +8,7 @@ import { isTerminal, JOB_STATE_LABEL, jobErrorText, useJob } from '@/api/useJob'
 import { useSingleFlight } from '@/api/useSingleFlight';
 import { describeConflict, useConflictNames } from '@/lib/conflicts';
 import { NON_BLANK } from '@/lib/forms';
+import { useUnsavedChanges } from '@/lib/unsaved';
 import { activeActivation, mainPhases } from '@/lib/phases';
 import { addDaysIso, formatDate, todayKyiv } from '@/lib/time';
 import {
@@ -16,6 +17,8 @@ import {
   Card,
   Chip,
   Field,
+  Modal,
+  ModalActions,
   Notice,
   PageHeader,
   ProblemNotice,
@@ -89,6 +92,8 @@ function AlertPlanCard({ plan, activeNow }: { plan: AlertPlan; activeNow: boolea
   const today = todayKyiv();
   const future = plan.activations.filter((a) => a.from > today);
   const locked = activeNow || future.length > 0;
+  // після скасування активація зникає зі списку — результат (втрачені заміни) показує картка
+  const [cancelled, setCancelled] = useState<{ from: string; warnings: Warnings } | null>(null);
   return (
     <Card>
       <div className={s.head}>
@@ -150,15 +155,26 @@ function AlertPlanCard({ plan, activeNow }: { plan: AlertPlan; activeNow: boolea
           </ul>
         </>
       )}
-      {/* запланована активація: :end лише задає дату повернення (скасувати її повністю API не дає) */}
+      {cancelled && (
+        <Notice tone="ok">
+          <p>Активацію з {formatDate(cancelled.from)} скасовано — діє звичайний розклад.</p>
+          <LostSubstitutions warnings={cancelled.warnings} />
+        </Notice>
+      )}
+      {/* запланована активація: дата повернення або скасування повністю (:end з її початком) */}
       {future.map((a) => (
-        <EndActivation key={a.activation_id} activation={a} />
+        <EndActivation
+          key={a.activation_id}
+          activation={a}
+          onCancelled={(warnings) => setCancelled({ from: a.from, warnings })}
+        />
       ))}
 
       {locked ? (
         <p className="muted">
           Поки є чинна або майбутня активація, перебудувати план і змінити дзвінки тривог не можна.
-          {future.length > 0 && ' Для запланованої активації можна задати дату повернення.'}
+          {future.length > 0 &&
+            ' Заплановану активацію можна скасувати або задати їй дату повернення.'}
         </p>
       ) : (
         <Stack>
@@ -236,6 +252,9 @@ function ApproveAlert() {
         approved_by: form.approved_by.trim(),
       }),
     onSuccess: invalidate,
+  });
+  useUnsavedChanges(!!(form.order_no.trim() || form.approved_by.trim()) && !approve.isSuccess, {
+    title: 'Наказ про розклад тривог не збережено',
   });
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -357,7 +376,14 @@ function ActivateAlert() {
  * за початок активації, не раніше сьогодні й не пізніше вже заданого кінця (інакше 422). Те саме
  * для ще не чинної активації: вона діятиме від початку до цієї дати.
  */
-function EndActivation({ activation: a }: { activation: AlertActivation }) {
+function EndActivation({
+  activation: a,
+  onCancelled,
+}: {
+  activation: AlertActivation;
+  /** Лише для запланованої (ще не чинної) активації: її можна скасувати повністю. */
+  onCancelled?: (warnings: Warnings) => void;
+}) {
   const invalidate = useInvalidatePlan();
   const today = todayKyiv();
   const min = [today, addDaysIso(a.from, 1)].sort().at(-1)!;
@@ -368,8 +394,13 @@ function EndActivation({ activation: a }: { activation: AlertActivation }) {
   });
   // подвійний клік не шле два :end (сервер повтор з тією ж датою вже не пише в журнал)
   const endOnce = useSingleFlight(end);
-  if (a.to && a.to < min) return null; // коротшою активацію вже не зробити
   const upcoming = a.from > today;
+  if (a.to && a.to < min) {
+    // коротшою активацію вже не зробити; запланованій лишається скасування
+    return upcoming && onCancelled ? (
+      <CancelActivation activation={a} onCancelled={onCancelled} />
+    ) : null;
+  }
   return (
     <form
       className={s.inline}
@@ -412,8 +443,71 @@ function EndActivation({ activation: a }: { activation: AlertActivation }) {
         >
           Повернути звичайний розклад
         </Button>
+        {upcoming && onCancelled && <CancelActivation activation={a} onCancelled={onCancelled} />}
       </div>
     </form>
+  );
+}
+
+/**
+ * Скасування запланованої активації: :end з датою її початку — сервер видаляє активацію, жодного
+ * дня розкладу тривог не лишається. Чинну так не скасувати (лише дата повернення).
+ */
+function CancelActivation({
+  activation: a,
+  onCancelled,
+}: {
+  activation: AlertActivation;
+  onCancelled: (warnings: Warnings) => void;
+}) {
+  const invalidate = useInvalidatePlan();
+  const [ask, setAsk] = useState(false);
+  const cancel = useMutation({
+    mutationFn: () => timetableApi.alertEnd(a.activation_id, a.from),
+    onSuccess: (res) => {
+      onCancelled(res.warnings);
+      invalidate();
+    },
+  });
+  const cancelOnce = useSingleFlight(cancel);
+  // timetable-service до скасування (from = початку) відповідав 422 invalid_date
+  const unsupported = isApiError(cancel.error, 'invalid_date');
+  const close = () => {
+    cancel.reset();
+    setAsk(false);
+  };
+  return (
+    <>
+      <Button variant="danger" onClick={() => setAsk(true)}>
+        Скасувати активацію
+      </Button>
+      <Modal open={ask} onClose={close} title={`Скасувати активацію з ${formatDate(a.from)}?`}>
+        <p>
+          Розклад тривог не діятиме жодного дня: на QR-сторінках лишиться звичайний розклад.
+          Погоджені заміни розкладу тривог на ці дні буде втрачено.
+        </p>
+        {unsupported ? (
+          <Notice tone="bad">
+            <p>
+              Сервер ще не вміє скасовувати заплановану активацію. Задайте найранішу дату повернення
+              — розклад тривог діятиме лише один день.
+            </p>
+          </Notice>
+        ) : (
+          cancel.error && <ProblemNotice error={cancel.error} />
+        )}
+        <ModalActions>
+          <Button onClick={close}>Залишити</Button>
+          <Button
+            variant="danger"
+            disabled={cancel.isPending || cancel.isSuccess || unsupported}
+            onClick={() => cancelOnce(undefined)}
+          >
+            Скасувати активацію
+          </Button>
+        </ModalActions>
+      </Modal>
+    </>
   );
 }
 
@@ -484,6 +578,7 @@ function AlertHoursCard() {
       void qc.invalidateQueries({ queryKey: ['alert-hours'] });
     },
   });
+  useUnsavedChanges(minutes !== '', { title: 'Тривалість тривог не збережено' });
 
   if (hours.isPending) return <Spinner />;
   if (hours.error) return <ProblemNotice error={hours.error} />;

@@ -5,6 +5,7 @@ import { isApiError } from '@/api/http';
 import type { PublishResponse } from '@/api/types';
 import { describeConflict, useConflictNames } from '@/lib/conflicts';
 import { NON_BLANK } from '@/lib/forms';
+import { useUnsavedChanges } from '@/lib/unsaved';
 import { formatDate, minEffectiveFrom, todayKyiv } from '@/lib/time';
 import { Button, Field, Notice, ProblemNotice, Stack } from '@/ui';
 
@@ -42,6 +43,11 @@ export function PublishForm({
       void qc.invalidateQueries({ queryKey: ['timetables'] });
       void qc.invalidateQueries({ queryKey: ['timetable', timetableId] });
     },
+  });
+
+  useUnsavedChanges(!!(form.order_no.trim() || form.approved_by.trim()) && !publish.isSuccess, {
+    title: 'Реквізити наказу не збережено',
+    text: 'Версію ще не опубліковано. Якщо піти зі сторінки, введені реквізити наказу буде втрачено.',
   });
 
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) =>

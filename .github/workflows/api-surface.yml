@@ -1,0 +1,25 @@
+name: API surface
+
+# Знімок API сервісів (src/api/surface.json) має відповідати develop timetable/school/tenant-service:
+# тести звіряють з ним клієнт і мок. Падіння тут — сигнал оновити знімок (npm run api:surface)
+# і привести мок/клієнт у відповідність. Щотижня — щоб помітити зміни сервісів і без PR у frontend.
+on:
+  pull_request:
+  push:
+    branches: [develop]
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: npm run api:surface:check

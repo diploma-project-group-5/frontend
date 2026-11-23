@@ -165,6 +165,68 @@ describe('Сценарії: розклад тривог', () => {
     expect(screen.getByText('запланована')).toBeInTheDocument(); // активація лишається, коротша
   });
 
+  it('заплановану активацію можна скасувати повністю (:end з датою її початку)', async () => {
+    await startMockBackend();
+    const mockFetch = globalThis.fetch;
+    const sent: unknown[] = [];
+    globalThis.fetch = async (input, init) => {
+      if (String(input).endsWith(':end')) sent.push(JSON.parse(String(init?.body)));
+      return mockFetch(input, init);
+    };
+    onTestFinished(() => {
+      globalThis.fetch = mockFetch;
+    });
+    const { user } = renderPage(<ScenariosPage />);
+    const tomorrow = addDaysIso(todayKyiv(), 1);
+    await screen.findByRole('heading', { name: 'Тривоги' });
+    fireEvent.change(screen.getByLabelText('З дати'), { target: { value: tomorrow } });
+    await user.click(screen.getByRole('button', { name: 'Активувати' }));
+    expect(await screen.findByText('запланована')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Скасувати активацію' }));
+    const ask = within(
+      screen.getByRole('dialog', { name: `Скасувати активацію з ${formatDate(tomorrow)}?` }),
+    );
+    await user.dblClick(ask.getByRole('button', { name: 'Скасувати активацію' }));
+
+    expect(
+      await screen.findByText(
+        `Активацію з ${formatDate(tomorrow)} скасовано — діє звичайний розклад.`,
+      ),
+    ).toBeInTheDocument();
+    expect(sent).toEqual([{ from: tomorrow }]);
+    expect(screen.queryByText('запланована')).not.toBeInTheDocument();
+    // план знову можна активувати
+    expect(screen.getByRole('button', { name: 'Активувати' })).toBeInTheDocument();
+  });
+
+  it('скасування на старому сервері (422 invalid_date) — пояснення, кнопка вимкнена', async () => {
+    await startMockBackend();
+    const mockFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (String(input).endsWith(':end'))
+        return Response.json(
+          { status: 422, code: 'invalid_date', title: 'Некоректна дата повернення' },
+          { status: 422, headers: { 'content-type': 'application/problem+json' } },
+        );
+      return mockFetch(input, init);
+    };
+    onTestFinished(() => {
+      globalThis.fetch = mockFetch;
+    });
+    const { user } = renderPage(<ScenariosPage />);
+    await screen.findByRole('heading', { name: 'Тривоги' });
+    fireEvent.change(screen.getByLabelText('З дати'), {
+      target: { value: addDaysIso(todayKyiv(), 1) },
+    });
+    await user.click(screen.getByRole('button', { name: 'Активувати' }));
+    await user.click(await screen.findByRole('button', { name: 'Скасувати активацію' }));
+    const ask = within(screen.getByRole('dialog', { name: /^Скасувати активацію з/ }));
+    await user.click(ask.getByRole('button', { name: 'Скасувати активацію' }));
+    expect(await ask.findByText(/Сервер ще не вміє скасовувати/)).toBeInTheDocument();
+    expect(ask.getByRole('button', { name: 'Скасувати активацію' })).toBeDisabled();
+  });
+
   it('подвійний клік «Повернути звичайний розклад» — один запит :end', async () => {
     await startMockBackend();
     const mockFetch = globalThis.fetch;

@@ -15,6 +15,7 @@ import {
   ProblemNotice,
   Spinner,
 } from '@/ui';
+import { useModalForm } from '@/ui/modalGuard';
 import { IconCopy, IconPlus } from '@/ui/icons';
 import s from './SchoolsPage.module.css';
 
@@ -128,6 +129,8 @@ function RegisterForm({
   const [name, setName] = useState('');
   const [login, setLogin] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const cancel =
+    useModalForm(!!(name.trim() || login.trim()), { title: 'Заклад не зареєстровано' }) ?? onClose;
 
   const register = useMutation({
     mutationFn: tenantApi.registerSchool,
@@ -201,7 +204,7 @@ function RegisterForm({
         register.error && <ProblemNotice error={register.error} />
       )}
       <ModalActions>
-        <Button onClick={onClose}>Скасувати</Button>
+        <Button onClick={cancel}>Скасувати</Button>
         <Button type="submit" variant="primary" disabled={register.isPending}>
           {register.isPending ? 'Реєструємо…' : 'Зареєструвати'}
         </Button>

@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { schoolApi, timetableApi } from '@/api/endpoints';
 import { isApiError } from '@/api/http';
 import type { AccessToken, CurriculumRow, Day, Teacher, TeacherInput } from '@/api/types';
+import { changed } from '@/lib/forms';
 import { DAY_SHORT } from '@/lib/time';
 import {
   Button,
@@ -17,6 +18,7 @@ import {
   Spinner,
   Toolbar,
 } from '@/ui';
+import { useModalForm } from '@/ui/modalGuard';
 import { IconCopy, IconEdit, IconPlus, IconQr, IconTrash } from '@/ui/icons';
 import { QrDialog } from './QrDialog';
 import s from './DataPages.module.css';
@@ -197,11 +199,14 @@ function TeacherForm({
   const qc = useQueryClient();
   const profile = useQuery({ queryKey: ['profile'], queryFn: schoolApi.getProfile });
   const days: Day[] = profile.data?.saturday ? [1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5];
-  const [form, setForm] = useState<TeacherInput>({
+  const [initial] = useState<TeacherInput>(() => ({
     label: editing?.label ?? '',
     weekly_hours_limit: editing?.weekly_hours_limit ?? 18,
     unavailable_days: editing?.unavailable_days ?? [],
-  });
+  }));
+  const [form, setForm] = useState(initial);
+  const cancel =
+    useModalForm(changed(form, initial), { title: 'Дані вчителя не збережено' }) ?? onClose;
   const [error, setError] = useState<string | null>(null);
   const save = useMutation({
     mutationFn: (b: TeacherInput) =>
@@ -284,7 +289,7 @@ function TeacherForm({
       )}
       {save.error && <ProblemNotice error={save.error} />}
       <ModalActions>
-        <Button onClick={onClose}>Скасувати</Button>
+        <Button onClick={cancel}>Скасувати</Button>
         <Button type="submit" variant="primary" disabled={save.isPending}>
           {editing ? 'Зберегти' : 'Додати'}
         </Button>
