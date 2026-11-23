@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { schoolApi } from '@/api/endpoints';
 import { isApiError } from '@/api/http';
 import type { EducationArea, Subject, SubjectInput } from '@/api/types';
+import { changed } from '@/lib/forms';
 import {
   Button,
   Card,
@@ -15,6 +16,7 @@ import {
   Spinner,
   Toolbar,
 } from '@/ui';
+import { useModalForm } from '@/ui/modalGuard';
 import { IconEdit, IconPlus, IconTrash } from '@/ui/icons';
 import s from './DataPages.module.css';
 
@@ -149,12 +151,14 @@ function plural(n: number) {
 
 function SubjectForm({ editing, onClose }: { editing: Subject | null; onClose: () => void }) {
   const qc = useQueryClient();
-  const [form, setForm] = useState<SubjectInput>({
+  const [initial] = useState<SubjectInput>(() => ({
     name: editing?.name ?? '',
     short_name: editing?.short_name ?? '',
     education_area: editing?.education_area ?? 'math',
     not_in_shelter: editing?.not_in_shelter ?? false,
-  });
+  }));
+  const [form, setForm] = useState(initial);
+  const cancel = useModalForm(changed(form, initial), { title: 'Предмет не збережено' }) ?? onClose;
   const save = useMutation({
     mutationFn: (b: SubjectInput) =>
       editing ? schoolApi.updateSubject(editing.subject_id, b) : schoolApi.createSubject(b),
@@ -228,7 +232,7 @@ function SubjectForm({ editing, onClose }: { editing: Subject | null; onClose: (
       </label>
       {save.error && <ProblemNotice error={save.error} />}
       <ModalActions>
-        <Button onClick={onClose}>Скасувати</Button>
+        <Button onClick={cancel}>Скасувати</Button>
         <Button type="submit" variant="primary" disabled={save.isPending}>
           {editing ? 'Зберегти' : 'Додати'}
         </Button>

@@ -501,6 +501,7 @@ function publicTimetable(scope: 'class' | 'teacher'): PublicTimetable {
   );
   return {
     state: 'published',
+    scope,
     target_label: scope === 'class' ? cls.name : teacher.label,
     published_at: current.published_at,
     upcoming_change: scheduled
@@ -902,6 +903,12 @@ function handle(url: URL, path: string, method: string, init: RequestInit | unde
       return problem(409, 'activation_ended', 'Активація вже завершилась', {
         detail: `Основний розклад діє з ${a.to}`,
       });
+    }
+    if (body.from === a.from && a.from > today) {
+      // скасування активації, що ще не почалась: from = її початок — активацію видалено
+      alertPlan.activations = alertPlan.activations.filter((x) => x !== a);
+      audit('alert_plan_cancelled', null, { from: body.from });
+      return json(200, { activation_id: id, warnings: { lost_substitutions: [] } });
     }
     if (body.from <= a.from || body.from < today || (a.to && body.from > a.to)) {
       return problem(422, 'invalid_date', 'Некоректна дата повернення', {

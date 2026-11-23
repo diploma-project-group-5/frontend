@@ -26,7 +26,7 @@ const ACTION_LABEL: Record<string, string> = {
   alert_plan_approved: 'Погоджено план тривог',
   alert_plan_activated: 'Активовано розклад тривог',
   alert_plan_ended: 'Повернено звичайний розклад',
-  alert_plan_activation_cancelled: 'Скасовано заплановану активацію тривог',
+  alert_plan_cancelled: 'Скасовано заплановану активацію тривог',
   absence_recorded: 'Внесено відсутність',
   absence_cancelled: 'Скасовано відсутність',
   substitution_approved: 'Погоджено заміну',

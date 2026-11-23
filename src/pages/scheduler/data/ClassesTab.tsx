@@ -14,7 +14,9 @@ import {
   Spinner,
   Toolbar,
 } from '@/ui';
+import { useModalForm } from '@/ui/modalGuard';
 import { IconEdit, IconPlus, IconQr, IconTrash } from '@/ui/icons';
+import { changed } from '@/lib/forms';
 import { QrDialog } from './QrDialog';
 import s from './DataPages.module.css';
 
@@ -174,11 +176,13 @@ function ClassFormBody({
   existing: SchoolClass[];
 }) {
   const qc = useQueryClient();
-  const [form, setForm] = useState<ClassInput>({
+  const [initial] = useState<ClassInput>(() => ({
     name: editing?.name ?? '',
     students: editing?.students ?? 28,
     in_person_priority: editing?.in_person_priority ?? false,
-  });
+  }));
+  const [form, setForm] = useState(initial);
+  const cancel = useModalForm(changed(form, initial), { title: 'Клас не збережено' }) ?? onClose;
   const [error, setError] = useState<string | null>(null);
   const save = useMutation({
     mutationFn: (b: ClassInput) =>
@@ -247,7 +251,7 @@ function ClassFormBody({
       )}
       {save.error && <ProblemNotice error={save.error} />}
       <ModalActions>
-        <Button onClick={onClose}>Скасувати</Button>
+        <Button onClick={cancel}>Скасувати</Button>
         <Button type="submit" variant="primary" disabled={save.isPending}>
           {editing ? 'Зберегти' : 'Створити'}
         </Button>

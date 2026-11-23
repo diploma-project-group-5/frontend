@@ -1,5 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
+import { flushSync } from 'react-dom';
 import { useSearchParams } from 'react-router';
 import { schoolApi, timetableApi } from '@/api/endpoints';
 import { isApiError } from '@/api/http';
@@ -16,6 +17,7 @@ import {
   versionIdAt,
 } from '@/lib/substitutions';
 import { addDaysIso, formatDate, formatDayHeading, todayKyiv } from '@/lib/time';
+import { useUnsavedChanges } from '@/lib/unsaved';
 import {
   Button,
   Card,
@@ -176,6 +178,12 @@ function NewAbsence({ onCreated }: { onCreated: (res: AbsenceAccepted) => void }
   const [mode, setMode] = useState<'all' | 'part'>('all');
   const [lessonNos, setLessonNos] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // знімок введеного на момент успішного запиту: після нього форма вже не «незбережена»
+  const entered = JSON.stringify([teacherId, from, to, mode, lessonNos]);
+  const [sent, setSent] = useState<string | null>(null);
+  useUnsavedChanges(!!(teacherId || from || to || lessonNos.length) && entered !== sent, {
+    title: 'Відсутність не збережено',
+  });
 
   const tid = teacherId || active[0]?.teacher_id || '';
   const dFrom = from || firstSchoolDate(saturday);
@@ -220,6 +228,8 @@ function NewAbsence({ onCreated }: { onCreated: (res: AbsenceAccepted) => void }
         ...(mode === 'part' ? { lesson_nos: lessonNos } : {}),
       }),
     onSuccess: (res) => {
+      // до переходу на вкладку пропозицій: інакше блокер незбережених змін зупинить і його
+      flushSync(() => setSent(entered));
       void qc.invalidateQueries({ queryKey: ['absences'] });
       onCreated(res);
     },

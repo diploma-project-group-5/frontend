@@ -466,6 +466,8 @@ export interface PublicDay {
 
 export interface PublicTimetable {
   state: 'published' | 'not_published';
+  /** Тип QR. Сервер до timetable-service із полем scope його не повертав — тоді його немає. */
+  scope?: 'class' | 'teacher';
   target_label: string;
   published_at: IsoDateTime | null;
   upcoming_change: string | null;

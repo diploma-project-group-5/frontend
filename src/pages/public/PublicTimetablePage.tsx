@@ -44,11 +44,12 @@ function useLocationHash() {
 
 /**
  * Чий розклад віддав сервер. Шлях (/c чи /t) обирає людина, а сервер рендерить за token.scope:
- * токен класу на /t давав «Розклад вчителя 1-А» з порожніми рядками. Якщо сервер повідомляє scope —
- * беремо його, інакше визначаємо за полями уроків (subject — клас, class_name — вчитель).
+ * токен класу на /t давав «Розклад вчителя 1-А» з порожніми рядками. Сервер повідомляє scope —
+ * беремо його; старіший сервер без поля — визначаємо за полями уроків (subject — клас,
+ * class_name — вчитель). null — не визначити (уроків немає): тоді тип сторінці не приписуємо.
  */
 function responseScope(data: PublicTimetable): Scope | null {
-  const declared = (data as { scope?: unknown }).scope;
+  const declared: unknown = data.scope;
   if (declared === 'class' || declared === 'teacher') return declared;
   for (const w of data.weeks)
     for (const d of w.days)
@@ -74,7 +75,8 @@ function PublicTimetablePage({ scope }: { scope: Scope }) {
     gcTime: 0,
   });
 
-  const wrongScope = !!q.data && (responseScope(q.data) ?? scope) !== scope;
+  const actual = q.data ? responseScope(q.data) : null;
+  const wrongScope = actual !== null && actual !== scope;
 
   let body;
   if (!token || (isApiError(q.error) && q.error.status === 404) || wrongScope) {
@@ -92,7 +94,8 @@ function PublicTimetablePage({ scope }: { scope: Scope }) {
       </Notice>
     );
   } else {
-    body = <TimetableView data={q.data} scope={scope} />;
+    // тип невідомий (сервер без scope, уроків немає) — нейтральний заголовок, а не «вчителя» для класу
+    body = <TimetableView data={q.data} scope={actual} />;
   }
 
   return (
@@ -105,22 +108,26 @@ function PublicTimetablePage({ scope }: { scope: Scope }) {
   );
 }
 
-function TimetableView({ data, scope }: { data: PublicTimetable; scope: Scope }) {
+const KIND: Record<Scope | 'unknown', { caption: string; noun: string; whose: string }> = {
+  class: { caption: 'Розклад класу', noun: 'Клас', whose: 'Цього класу' },
+  teacher: { caption: 'Розклад вчителя', noun: 'Вчитель', whose: 'Цього вчителя' },
+  unknown: { caption: 'Розклад занять', noun: 'Розклад', whose: 'Цього розкладу' },
+};
+
+function TimetableView({ data, scope }: { data: PublicTimetable; scope: Scope | null }) {
   // назва береться з опублікованих версій: класу, доданого після побудови, у них ще немає
   const unnamed = !data.target_label.trim();
+  const kind = KIND[scope ?? 'unknown'];
   return (
     <>
       <header className={s.header}>
-        <div className="muted">{scope === 'class' ? 'Розклад класу' : 'Розклад вчителя'}</div>
-        <h1>{unnamed ? (scope === 'class' ? 'Клас' : 'Вчитель') : data.target_label}</h1>
+        <div className="muted">{kind.caption}</div>
+        <h1>{unnamed ? kind.noun : data.target_label}</h1>
       </header>
 
       {unnamed && data.state === 'published' && (
         <Notice tone="info">
-          <p>
-            {scope === 'class' ? 'Цього класу' : 'Цього вчителя'} ще немає в опублікованому
-            розкладі. Зверніться до закладу.
-          </p>
+          <p>{kind.whose} ще немає в опублікованому розкладі. Зверніться до закладу.</p>
         </Notice>
       )}
 
@@ -148,7 +155,7 @@ function TimetableView({ data, scope }: { data: PublicTimetable; scope: Scope })
   );
 }
 
-function DayCard({ day, scope }: { day: PublicDay; scope: Scope }) {
+function DayCard({ day, scope }: { day: PublicDay; scope: Scope | null }) {
   if (day.holiday) {
     return (
       <article className={s.day}>
