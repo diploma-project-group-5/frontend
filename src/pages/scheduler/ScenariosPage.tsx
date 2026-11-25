@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { schoolApi, timetableApi } from '@/api/endpoints';
 import { isApiError } from '@/api/http';
@@ -10,6 +10,8 @@ import { describeConflict, useConflictNames } from '@/lib/conflicts';
 import { NON_BLANK } from '@/lib/forms';
 import { useUnsavedChanges } from '@/lib/unsaved';
 import { activeActivation, mainPhases } from '@/lib/phases';
+import { schoolDatesBetween } from '@/lib/substitutions';
+import { DAYS_FORMS, durationText, LESSONS_FORMS, plural } from '@/lib/plural';
 import { addDaysIso, formatDate, todayKyiv } from '@/lib/time';
 import {
   Badge,
@@ -17,8 +19,6 @@ import {
   Card,
   Chip,
   Field,
-  Modal,
-  ModalActions,
   Notice,
   PageHeader,
   ProblemNotice,
@@ -92,8 +92,6 @@ function AlertPlanCard({ plan, activeNow }: { plan: AlertPlan; activeNow: boolea
   const today = todayKyiv();
   const future = plan.activations.filter((a) => a.from > today);
   const locked = activeNow || future.length > 0;
-  // після скасування активація зникає зі списку — результат (втрачені заміни) показує картка
-  const [cancelled, setCancelled] = useState<{ from: string; warnings: Warnings } | null>(null);
   return (
     <Card>
       <div className={s.head}>
@@ -131,7 +129,7 @@ function AlertPlanCard({ plan, activeNow }: { plan: AlertPlan; activeNow: boolea
         <dt>Дзвінки тривог</dt>
         <dd>
           {plan.bells.length
-            ? `${plan.bells[0]!.start}–${plan.bells.at(-1)!.end}, ${plan.bells.length} уроків`
+            ? `${plan.bells[0]!.start}–${plan.bells.at(-1)!.end}, ${plural(plan.bells.length, LESSONS_FORMS)}`
             : 'не задано'}
         </dd>
       </dl>
@@ -142,8 +140,7 @@ function AlertPlanCard({ plan, activeNow }: { plan: AlertPlan; activeNow: boolea
           <ul className={s.activations}>
             {plan.activations.map((a) => (
               <li key={a.activation_id}>
-                з {formatDate(a.from)}
-                {a.to ? ` по ${formatDate(a.to)}` : ' — діє далі'}
+                {activationPeriod(a)}
                 {a.from > today && (
                   <>
                     {' '}
@@ -155,26 +152,16 @@ function AlertPlanCard({ plan, activeNow }: { plan: AlertPlan; activeNow: boolea
           </ul>
         </>
       )}
-      {cancelled && (
-        <Notice tone="ok">
-          <p>Активацію з {formatDate(cancelled.from)} скасовано — діє звичайний розклад.</p>
-          <LostSubstitutions warnings={cancelled.warnings} />
-        </Notice>
-      )}
-      {/* запланована активація: дата повернення або скасування повністю (:end з її початком) */}
+      {/* запланована активація: лише дата повернення — скасувати повністю специфікація не дає */}
       {future.map((a) => (
-        <EndActivation
-          key={a.activation_id}
-          activation={a}
-          onCancelled={(warnings) => setCancelled({ from: a.from, warnings })}
-        />
+        <EndActivation key={a.activation_id} activation={a} />
       ))}
 
       {locked ? (
         <p className="muted">
           Поки є чинна або майбутня активація, перебудувати план і змінити дзвінки тривог не можна.
           {future.length > 0 &&
-            ' Заплановану активацію можна скасувати або задати їй дату повернення.'}
+            ' Заплановану активацію повністю скасувати не можна: найкоротша — один день, якщо звичайний розклад повернути з наступного дня після її початку.'}
         </p>
       ) : (
         <Stack>
@@ -186,6 +173,18 @@ function AlertPlanCard({ plan, activeNow }: { plan: AlertPlan; activeNow: boolea
       )}
     </Card>
   );
+}
+
+/**
+ * to — дата, з якої знову діє звичайний розклад (from ≤ дата < to), тож останній день тривог —
+ * напередодні. Показуємо дні розкладу тривог, а не межу.
+ */
+function activationPeriod(a: AlertActivation) {
+  if (!a.to) return `з ${formatDate(a.from)}, без дати повернення`;
+  const last = addDaysIso(a.to, -1);
+  return last === a.from
+    ? `${formatDate(a.from)} (один день), звичайний — з ${formatDate(a.to)}`
+    : `з ${formatDate(a.from)} по ${formatDate(last)}, звичайний — з ${formatDate(a.to)}`;
 }
 
 function useInvalidatePlan() {
@@ -253,12 +252,14 @@ function ApproveAlert() {
       }),
     onSuccess: invalidate,
   });
+  // повторний :approve пише другий запис «Погоджено план тривог» у журнал
+  const approveOnce = useSingleFlight(approve);
   useUnsavedChanges(!!(form.order_no.trim() || form.approved_by.trim()) && !approve.isSuccess, {
     title: 'Наказ про розклад тривог не збережено',
   });
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    approve.mutate();
+    approveOnce();
   };
   return (
     <form onSubmit={submit} className={s.inline}>
@@ -300,7 +301,7 @@ function ApproveAlert() {
       </Field>
       {approve.error && <ProblemNotice error={approve.error} />}
       <div>
-        <Button type="submit" variant="primary" disabled={approve.isPending}>
+        <Button type="submit" variant="primary" disabled={approve.isPending || approve.isSuccess}>
           Погодити
         </Button>
       </div>
@@ -322,6 +323,16 @@ function LostSubstitutions({ warnings }: { warnings: Warnings | undefined }) {
 function ActivateAlert() {
   const invalidate = useInvalidatePlan();
   const [from, setFrom] = useState(todayKyiv());
+  const profile = useQuery({ queryKey: ['profile'], queryFn: schoolApi.getProfile });
+  const holidays = useQuery({ queryKey: ['holidays'], queryFn: timetableApi.getHolidays });
+  const saturday = !!profile.data?.saturday;
+  const isSchool = (d: string) =>
+    schoolDatesBetween(d, d, saturday, holidays.data ?? null).length > 0;
+  // вихідний чи канікули — сервер відповість not_school_day; підказуємо найближчу навчальну дату
+  const nextSchool =
+    from && profile.data && !isSchool(from)
+      ? schoolDatesBetween(from, addDaysIso(from, 60), saturday, holidays.data ?? null)[0]
+      : undefined;
   const activate = useMutation({
     mutationFn: () => timetableApi.alertActivate(from),
     onSuccess: invalidate,
@@ -344,10 +355,22 @@ function ActivateAlert() {
             min={todayKyiv()}
             required
             value={from}
-            onChange={(e) => setFrom(e.target.value)}
+            onChange={(e) => {
+              activate.reset();
+              setFrom(e.target.value);
+            }}
           />
         )}
       </Field>
+      {nextSchool && (
+        <p className="muted" role="status">
+          {formatDate(from)} — не навчальний день. Найближчий навчальний —{' '}
+          <button type="button" onClick={() => setFrom(nextSchool)}>
+            {formatDate(nextSchool)}
+          </button>
+          .
+        </p>
+      )}
       {isApiError(activate.error, 'stale') ? (
         <Notice tone="bad">
           <p>
@@ -376,14 +399,7 @@ function ActivateAlert() {
  * за початок активації, не раніше сьогодні й не пізніше вже заданого кінця (інакше 422). Те саме
  * для ще не чинної активації: вона діятиме від початку до цієї дати.
  */
-function EndActivation({
-  activation: a,
-  onCancelled,
-}: {
-  activation: AlertActivation;
-  /** Лише для запланованої (ще не чинної) активації: її можна скасувати повністю. */
-  onCancelled?: (warnings: Warnings) => void;
-}) {
+function EndActivation({ activation: a }: { activation: AlertActivation }) {
   const invalidate = useInvalidatePlan();
   const today = todayKyiv();
   const min = [today, addDaysIso(a.from, 1)].sort().at(-1)!;
@@ -395,12 +411,7 @@ function EndActivation({
   // подвійний клік не шле два :end (сервер повтор з тією ж датою вже не пише в журнал)
   const endOnce = useSingleFlight(end);
   const upcoming = a.from > today;
-  if (a.to && a.to < min) {
-    // коротшою активацію вже не зробити; запланованій лишається скасування
-    return upcoming && onCancelled ? (
-      <CancelActivation activation={a} onCancelled={onCancelled} />
-    ) : null;
-  }
+  if (a.to && a.to < min) return null; // коротшою активацію вже не зробити
   return (
     <form
       className={s.inline}
@@ -443,71 +454,8 @@ function EndActivation({
         >
           Повернути звичайний розклад
         </Button>
-        {upcoming && onCancelled && <CancelActivation activation={a} onCancelled={onCancelled} />}
       </div>
     </form>
-  );
-}
-
-/**
- * Скасування запланованої активації: :end з датою її початку — сервер видаляє активацію, жодного
- * дня розкладу тривог не лишається. Чинну так не скасувати (лише дата повернення).
- */
-function CancelActivation({
-  activation: a,
-  onCancelled,
-}: {
-  activation: AlertActivation;
-  onCancelled: (warnings: Warnings) => void;
-}) {
-  const invalidate = useInvalidatePlan();
-  const [ask, setAsk] = useState(false);
-  const cancel = useMutation({
-    mutationFn: () => timetableApi.alertEnd(a.activation_id, a.from),
-    onSuccess: (res) => {
-      onCancelled(res.warnings);
-      invalidate();
-    },
-  });
-  const cancelOnce = useSingleFlight(cancel);
-  // timetable-service до скасування (from = початку) відповідав 422 invalid_date
-  const unsupported = isApiError(cancel.error, 'invalid_date');
-  const close = () => {
-    cancel.reset();
-    setAsk(false);
-  };
-  return (
-    <>
-      <Button variant="danger" onClick={() => setAsk(true)}>
-        Скасувати активацію
-      </Button>
-      <Modal open={ask} onClose={close} title={`Скасувати активацію з ${formatDate(a.from)}?`}>
-        <p>
-          Розклад тривог не діятиме жодного дня: на QR-сторінках лишиться звичайний розклад.
-          Погоджені заміни розкладу тривог на ці дні буде втрачено.
-        </p>
-        {unsupported ? (
-          <Notice tone="bad">
-            <p>
-              Сервер ще не вміє скасовувати заплановану активацію. Задайте найранішу дату повернення
-              — розклад тривог діятиме лише один день.
-            </p>
-          </Notice>
-        ) : (
-          cancel.error && <ProblemNotice error={cancel.error} />
-        )}
-        <ModalActions>
-          <Button onClick={close}>Залишити</Button>
-          <Button
-            variant="danger"
-            disabled={cancel.isPending || cancel.isSuccess || unsupported}
-            onClick={() => cancelOnce(undefined)}
-          >
-            Скасувати активацію
-          </Button>
-        </ModalActions>
-      </Modal>
-    </>
   );
 }
 
@@ -537,6 +485,16 @@ function AlertBells({ approved }: { approved: boolean }) {
       void qc.invalidateQueries({ queryKey: ['alert-plan'] }); // стан плану міг стати draft
     },
   });
+  // «Збережено. Перебудуйте й погодьте» — лише доки план не перебудовано й не погоджено
+  // (саме збереження повертає погоджений план у draft — це не привід ховати підказку)
+  const templateId = plan.data?.timetable_id;
+  const nowApproved = plan.data?.state === 'approved';
+  const { reset } = save;
+  const prevTemplate = useRef(templateId);
+  useEffect(() => {
+    if (nowApproved || prevTemplate.current !== templateId) reset();
+    prevTemplate.current = templateId;
+  }, [templateId, nowApproved, reset]);
   if (!plan.data || profile.isPending) return <Spinner />;
   const bells = plan.data.bells;
   const count = bells.length || Math.min(profile.data?.lessons_per_day ?? 1, MAX_BELLS);
@@ -590,14 +548,16 @@ function AlertHoursCard() {
       <div className={s.head}>
         <h3>Облік тривог · останні 14 днів</h3>
         <span className="muted">
-          поріг: понад {h.threshold_minutes / 60} год за день, {h.threshold_days} дні поспіль
+          поріг: понад {durationText(h.threshold_minutes)} за день,{' '}
+          {plural(h.threshold_days, DAYS_FORMS)} поспіль
         </span>
       </div>
       {h.recommendation && (
         <Notice tone="warn">
           <p>
-            Тривоги тривали понад {h.threshold_minutes / 60} год {h.current_streak_days} дні
-            поспіль. Рекомендуємо перейти на розклад тривог — рішення ухвалює керівник закладу.
+            Тривоги тривали понад {durationText(h.threshold_minutes)}{' '}
+            {plural(h.current_streak_days, DAYS_FORMS)} поспіль. Рекомендуємо перейти на розклад
+            тривог — рішення ухвалює керівник закладу.
           </p>
         </Notice>
       )}

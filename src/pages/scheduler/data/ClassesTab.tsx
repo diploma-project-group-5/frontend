@@ -17,6 +17,7 @@ import {
 import { useModalForm } from '@/ui/modalGuard';
 import { IconEdit, IconPlus, IconQr, IconTrash } from '@/ui/icons';
 import { changed } from '@/lib/forms';
+import { sortByLabel } from '@/lib/sort';
 import { QrDialog } from './QrDialog';
 import s from './DataPages.module.css';
 
@@ -75,58 +76,59 @@ export function ClassesTab() {
             </tr>
           </thead>
           <tbody>
-            {classes.data
-              .filter((c) => !c.archived_at)
-              .map((c) => {
-                const n = lessonsOf(c.class_id);
-                return (
-                  <tr key={c.class_id}>
-                    <td>
-                      <b>{c.name}</b>
-                    </td>
-                    <td className={s.num}>{c.students}</td>
-                    <td>
-                      {c.in_person_priority ? (
-                        <Chip tone="in">так</Chip>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
-                    <td className={`${s.num} ${cap && n > cap ? s.over : ''}`}>
-                      {n} / {cap || '—'}
-                    </td>
-                    <td>
-                      <RowActions>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={!tokenOf(c.class_id)}
-                          onClick={() => setQr(tokenOf(c.class_id))}
-                        >
-                          <IconQr width={15} height={15} />
-                          QR
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          aria-label={`Редагувати ${c.name}`}
-                          onClick={() => setEdit(c)}
-                        >
-                          <IconEdit width={15} height={15} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          aria-label={`Архівувати ${c.name}`}
-                          onClick={() => setArchive(c)}
-                        >
-                          <IconTrash width={15} height={15} />
-                        </Button>
-                      </RowActions>
-                    </td>
-                  </tr>
-                );
-              })}
+            {sortByLabel(
+              classes.data.filter((c) => !c.archived_at),
+              (c) => c.name,
+            ).map((c) => {
+              const n = lessonsOf(c.class_id);
+              return (
+                <tr key={c.class_id}>
+                  <td>
+                    <b>{c.name}</b>
+                  </td>
+                  <td className={s.num}>{c.students}</td>
+                  <td>
+                    {c.in_person_priority ? (
+                      <Chip tone="in">так</Chip>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td className={`${s.num} ${cap && n > cap ? s.over : ''}`}>
+                    {n} / {cap || '—'}
+                  </td>
+                  <td>
+                    <RowActions>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={!tokenOf(c.class_id)}
+                        onClick={() => setQr(tokenOf(c.class_id))}
+                      >
+                        <IconQr width={15} height={15} />
+                        QR
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Редагувати ${c.name}`}
+                        onClick={() => setEdit(c)}
+                      >
+                        <IconEdit width={15} height={15} />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Архівувати ${c.name}`}
+                        onClick={() => setArchive(c)}
+                      >
+                        <IconTrash width={15} height={15} />
+                      </Button>
+                    </RowActions>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </Card>

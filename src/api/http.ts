@@ -79,14 +79,18 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
 
   const text = await res.text();
   let parsed: unknown = undefined;
+  let json = true;
   if (text) {
     try {
       parsed = JSON.parse(text);
     } catch {
-      parsed = { title: text };
+      json = false;
     }
   }
 
+  // Не JSON — не відповідь сервісу: сторінка шлюзу (502/503/504, 429) чи index.html. Сирий текст
+  // чи HTML укладачу не показуємо, а «успіх» з HTML замість даних — це помилка, не дані.
+  if (!json) throw new ApiError(res.ok ? 502 : res.status, { unexpected: true });
   if (!res.ok) {
     const body = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
     throw new ApiError(res.status, body);

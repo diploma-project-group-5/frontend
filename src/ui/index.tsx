@@ -185,20 +185,50 @@ function validationText(detail: string | undefined) {
   return detail && /[а-яіїєґ]/i.test(detail) ? humanizeFields(detail) : VALIDATION_FALLBACK;
 }
 
-/** 422 profile_incomplete: які саме поля заповнити (fields у тілі відповіді). */
+/**
+ * 422 profile_incomplete: які саме поля заповнити (fields у тілі відповіді). Дзвінки тривог — не
+ * частина профілю: їх задають у «Сценаріях», тож про них окреме речення.
+ */
 function incompleteText(fields: unknown) {
   const list = Array.isArray(fields) ? fields.filter((f) => typeof f === 'string') : [];
-  return list.length
-    ? `${CODE_TEXT.profile_incomplete} Заповніть: ${list.map(fieldLabel).join(', ')}.`
-    : CODE_TEXT.profile_incomplete;
+  const bells = list.includes('alert_bells');
+  const profile = list.filter((f) => f !== 'alert_bells');
+  const parts = [
+    profile.length
+      ? `${CODE_TEXT.profile_incomplete} Заповніть: ${profile.map(fieldLabel).join(', ')}.`
+      : !bells
+        ? CODE_TEXT.profile_incomplete
+        : '',
+    bells ? 'Дзвінки тривог не задано: задайте їх у блоці «Дзвінки тривог» і побудуйте план.' : '',
+  ];
+  return parts.filter(Boolean).join(' ');
+}
+
+/**
+ * Відповідь без problem+json — від шлюзу, а не від сервісу (Traefik: 502/503/504, 429, 404 page not
+ * found) або не той формат. Тексти — за статусом.
+ */
+function gatewayText(error: ApiError) {
+  if (error.status === 429) return 'Забагато запитів. Зачекайте хвилину й повторіть.';
+  if (error.status >= 502 && error.status <= 504 && !error.body.unexpected)
+    return 'Сервіс тимчасово недоступний (можливо, його перезапускають). Спробуйте за хвилину.';
+  if (error.body.unexpected)
+    return 'Сервер відповів у неочікуваному форматі. Оновіть сторінку; якщо не допоможе — зверніться до адміністратора.';
+  return `Запит не виконано (код ${error.status}). Спробуйте ще раз.`;
 }
 
 export function ProblemNotice({ error }: { error: unknown }) {
   const names = useCachedConflictNames();
   if (!error) return null;
   if (error instanceof ApiError) {
-    const text =
-      error.code === 'validation_failed'
+    // без code: сторінка шлюзу чи не JSON; problem+json сервісу без code показує свій title
+    const gateway =
+      !!error.body.unexpected ||
+      (!error.code &&
+        (typeof error.body.title !== 'string' || [429, 502, 503, 504].includes(error.status)));
+    const text = gateway
+      ? gatewayText(error)
+      : error.code === 'validation_failed'
         ? validationText(error.detail)
         : error.code === 'profile_incomplete'
           ? incompleteText(error.body.fields)

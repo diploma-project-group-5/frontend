@@ -83,15 +83,30 @@ describe('request', () => {
     expect(url.searchParams.get('n')).toBe('3');
   });
 
-  it('помилка не в JSON (напр. від шлюзу): текст іде в title, code немає', async () => {
+  it('помилка не в JSON (сторінка шлюзу): статус лишається, сирий текст у title не потрапляє', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Bad Gateway', { status: 502 })));
     const err = (await request('/school/classes').catch((e: unknown) => e)) as ApiError;
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(502);
-    expect(err.title).toBe('Bad Gateway');
+    expect(err.title).not.toContain('Bad Gateway');
     expect(err.code).toBeUndefined();
     expect(err.conflicts).toEqual([]);
     expect(isApiError(err, 'stale')).toBe(false);
+  });
+
+  it('200 з HTML замість JSON (index.html замість API) — помилка, а не дані', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('<!doctype html><html></html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        }),
+      ),
+    );
+    const err = await request('/school/classes').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).body.unexpected).toBe(true);
   });
 
   it('порожня відповідь (204) — data undefined, без помилки розбору', async () => {

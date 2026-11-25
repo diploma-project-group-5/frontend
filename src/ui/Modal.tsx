@@ -28,6 +28,9 @@ export function Modal({
   const [dirty, setDirty] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const stayRef = useRef<HTMLButtonElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // де був фокус до питання «Закрити без збереження?» — туди й повертаємо після «Повернутися»
+  const returnFocus = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const d = ref.current;
@@ -43,13 +46,29 @@ export function Modal({
   }
 
   useEffect(() => {
-    if (confirming) stayRef.current?.focus();
+    if (confirming) {
+      stayRef.current?.focus();
+      return;
+    }
+    const target = returnFocus.current;
+    returnFocus.current = null;
+    if (!target) return;
+    // кнопка «Скасувати», з якої питали, лишилась у формі; інакше — перше поле форми
+    const fallback = bodyRef.current?.querySelector<HTMLElement>(
+      'input, select, textarea, button, [tabindex]:not([tabindex="-1"])',
+    );
+    (target.isConnected && bodyRef.current?.contains(target) ? target : fallback)?.focus();
   }, [confirming]);
 
+  const ask = useCallback(() => {
+    if (document.activeElement instanceof HTMLElement && !returnFocus.current)
+      returnFocus.current = document.activeElement;
+    setConfirming(true);
+  }, []);
   const requestClose = useCallback(() => {
-    if (dirty) setConfirming(true);
+    if (dirty) ask();
     else onClose();
-  }, [dirty, onClose]);
+  }, [dirty, onClose, ask]);
   const guard = useMemo(() => ({ setDirty, requestClose }), [requestClose]);
   const holdOpen = !dismissible || dirty;
 
@@ -60,13 +79,15 @@ export function Modal({
       onCancel={(e) => {
         if (!holdOpen) return;
         e.preventDefault();
-        if (dirty) setConfirming(true);
+        // Esc на питанні — те саме, що «Повернутися до форми»
+        if (confirming) setConfirming(false);
+        else if (dirty) ask();
       }}
       onClose={() => {
         // браузер може закрити вікно й попри preventDefault (повторний Esc) — відкриваємо знову
         if (holdOpen && open) {
           ref.current?.showModal();
-          if (dirty) setConfirming(true);
+          if (dirty && !confirming) ask();
         } else onClose();
       }}
       aria-labelledby={titleId}
@@ -75,7 +96,9 @@ export function Modal({
         <ModalGuardContext.Provider value={guard}>
           <h2 id={titleId}>{title}</h2>
           {/* форму лише ховаємо, а не розмонтовуємо — «Повернутися» лишає введене */}
-          <div hidden={confirming}>{children}</div>
+          <div ref={bodyRef} hidden={confirming}>
+            {children}
+          </div>
           {confirming && (
             <div role="alert">
               <p>Введене не збережено. Закрити вікно без збереження?</p>

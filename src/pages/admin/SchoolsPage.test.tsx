@@ -62,4 +62,25 @@ describe('Заклади (системний адмін)', () => {
     await user.type(screen.getByRole('searchbox'), 'немає такого');
     expect(screen.getByText('Нічого не знайдено')).toBeInTheDocument();
   });
+
+  it('тимчасовий пароль: «Назад» і закриття вкладки спершу питають', async () => {
+    const { user, dialog, router } = await openRegister();
+    await user.type(dialog.getByLabelText('Назва закладу'), 'Гімназія № 4');
+    await user.type(dialog.getByLabelText('Логін укладача розкладу'), 'gymn4');
+    await user.click(dialog.getByRole('button', { name: 'Зареєструвати' }));
+    const done = within(await screen.findByRole('dialog', { name: 'Заклад зареєстровано' }));
+
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+
+    const from = router.state.location.pathname;
+    void router.navigate('/admin/elsewhere');
+    const ask = within(
+      await screen.findByRole('dialog', { name: 'Тимчасовий пароль показується лише раз' }),
+    );
+    await user.click(ask.getByRole('button', { name: 'Залишитися' }));
+    expect(router.state.location.pathname).toBe(from);
+    expect((done.getByLabelText('Тимчасовий пароль') as HTMLInputElement).value).not.toBe('');
+  });
 });

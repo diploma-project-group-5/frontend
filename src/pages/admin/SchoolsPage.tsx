@@ -4,6 +4,7 @@ import { tenantApi } from '@/api/endpoints';
 import { isApiError } from '@/api/http';
 import type { SchoolListItem, SchoolRegistered } from '@/api/types';
 import { formatDate, todayKyiv } from '@/lib/time';
+import { useUnsavedChanges } from '@/lib/unsaved';
 import {
   Button,
   Card,
@@ -222,6 +223,11 @@ function TemporaryPassword({
   onDone: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  // «Назад», оновлення чи закриття вкладки знищили б єдиний показ пароля — спершу питаємо
+  useUnsavedChanges(!!created, {
+    title: 'Тимчасовий пароль показується лише раз',
+    text: 'Сервер його не зберігає: якщо піти зі сторінки, пароль не переглянути — лише створити новий у консолі Keycloak. Спершу збережіть його.',
+  });
   const done = () => {
     setCopied(false);
     onDone();

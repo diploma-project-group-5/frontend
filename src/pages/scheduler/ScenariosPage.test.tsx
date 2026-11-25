@@ -11,14 +11,21 @@ describe('Сценарії: розклад тривог', () => {
 
     fireEvent.change(screen.getByLabelText('З дати'), { target: { value: todayKyiv() } });
     await user.click(screen.getByRole('button', { name: 'Активувати' }));
-    expect(await screen.findByText(`з ${formatDate(todayKyiv())} — діє далі`)).toBeInTheDocument();
+    expect(
+      await screen.findByText(`з ${formatDate(todayKyiv())}, без дати повернення`),
+    ).toBeInTheDocument();
     // поки активація діє, план не перебудовують
     expect(
       screen.getByText(/перебудувати план і змінити дзвінки тривог не можна/),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Повернути звичайний розклад' }));
-    expect(await screen.findByText(new RegExp(`з ${formatDate(todayKyiv())} по `))).toBeVisible();
+    // to — дата повернення (виключно): активація з сьогодні до завтра — один день тривог
+    expect(
+      await screen.findByText(
+        `${formatDate(todayKyiv())} (один день), звичайний — з ${formatDate(addDaysIso(todayKyiv(), 1))}`,
+      ),
+    ).toBeVisible();
   });
 
   it('облік тривог: хвилини за сьогодні з’являються на графіку', async () => {
@@ -70,6 +77,69 @@ describe('Сценарії: розклад тривог', () => {
     expect(await screen.findByText(/Дзвінки тривог збережено/)).toBeInTheDocument();
     expect(await screen.findByText('08:30–13:45, 7 уроків')).toBeInTheDocument();
     expect(screen.getByText('не погоджено')).toBeInTheDocument();
+  });
+
+  it('підказка «Перебудуйте й погодьте» зникає, коли план погоджено', async () => {
+    await startMockBackend();
+    const sent: unknown[] = [];
+    const mockFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (String(input).endsWith(':approve')) sent.push(JSON.parse(String(init?.body)));
+      return mockFetch(input, init);
+    };
+    onTestFinished(() => {
+      globalThis.fetch = mockFetch;
+    });
+    const { user } = renderPage(<ScenariosPage />);
+    await screen.findByRole('heading', { name: 'Дзвінки тривог' });
+    fireEvent.change(screen.getByLabelText('Кінець уроку 6'), { target: { value: '13:05' } });
+    await user.click(screen.getByRole('button', { name: 'Зберегти дзвінки тривог' }));
+    expect(await screen.findByText(/Дзвінки тривог збережено/)).toBeInTheDocument();
+
+    // погодження: номер наказу з пробілами по краях іде на сервер обрізаним; подвійний клік — один запит
+    await user.type(await screen.findByLabelText('Наказ №'), '  15-од  ');
+    await user.type(screen.getByLabelText('Затвердив'), ' Директор ');
+    await user.dblClick(screen.getByRole('button', { name: 'Погодити' }));
+    expect(await screen.findByText('погоджено')).toBeInTheDocument();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ order_no: '15-од', approved_by: 'Директор' });
+    expect(screen.queryByText(/Дзвінки тривог збережено/)).not.toBeInTheDocument();
+  });
+
+  it('облік тривог: числа з правильними формами («5 днів», «1 год 30 хв»)', async () => {
+    await startMockBackend();
+    const mockFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (new URL(String(input), location.origin).pathname === '/api/v1/timetable/alert-hours')
+        return Response.json({
+          days: [],
+          threshold_minutes: 90,
+          threshold_days: 5,
+          current_streak_days: 6,
+          recommendation: true,
+        });
+      return mockFetch(input, init);
+    };
+    onTestFinished(() => {
+      globalThis.fetch = mockFetch;
+    });
+    renderPage(<ScenariosPage />);
+    expect(
+      await screen.findByText(/поріг: понад 1 год 30 хв за день, 5 днів поспіль/),
+    ).toBeVisible();
+    expect(screen.getByText(/Тривоги тривали понад 1 год 30 хв 6 днів поспіль/)).toBeVisible();
+  });
+
+  it('активація на неділю: підказка з найближчою навчальною датою', async () => {
+    await startMockBackend();
+    const { user } = renderPage(<ScenariosPage />);
+    await screen.findByRole('heading', { name: 'Тривоги' });
+    let sunday = addDaysIso(todayKyiv(), 1);
+    while (new Date(`${sunday}T12:00:00Z`).getUTCDay() !== 0) sunday = addDaysIso(sunday, 1);
+    fireEvent.change(screen.getByLabelText('З дати'), { target: { value: sunday } });
+    const hint = await screen.findByText(/не навчальний день/);
+    await user.click(within(hint).getByRole('button'));
+    expect(screen.getByLabelText('З дати')).toHaveValue(addDaysIso(sunday, 1)); // понеділок
   });
 
   it('побудова rejected: видно причину (alert_plan_locked) і конфлікти', async () => {
@@ -160,71 +230,34 @@ describe('Сценарії: розклад тривог', () => {
     await user.click(form.getByRole('button', { name: 'Повернути звичайний розклад' }));
 
     expect(
-      await screen.findByText(`з ${formatDate(tomorrow)} по ${formatDate(back)}`),
+      await screen.findByText(
+        `з ${formatDate(tomorrow)} по ${formatDate(addDaysIso(back, -1))}, звичайний — з ${formatDate(back)}`,
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText('запланована')).toBeInTheDocument(); // активація лишається, коротша
   });
 
-  it('заплановану активацію можна скасувати повністю (:end з датою її початку)', async () => {
+  it('запланованої активації не скасувати повністю: :end з датою її початку — 422 від сервера', async () => {
     await startMockBackend();
-    const mockFetch = globalThis.fetch;
-    const sent: unknown[] = [];
-    globalThis.fetch = async (input, init) => {
-      if (String(input).endsWith(':end')) sent.push(JSON.parse(String(init?.body)));
-      return mockFetch(input, init);
-    };
-    onTestFinished(() => {
-      globalThis.fetch = mockFetch;
-    });
     const { user } = renderPage(<ScenariosPage />);
     const tomorrow = addDaysIso(todayKyiv(), 1);
     await screen.findByRole('heading', { name: 'Тривоги' });
     fireEvent.change(screen.getByLabelText('З дати'), { target: { value: tomorrow } });
     await user.click(screen.getByRole('button', { name: 'Активувати' }));
     expect(await screen.findByText('запланована')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Скасувати активацію' }));
-    const ask = within(
-      screen.getByRole('dialog', { name: `Скасувати активацію з ${formatDate(tomorrow)}?` }),
-    );
-    await user.dblClick(ask.getByRole('button', { name: 'Скасувати активацію' }));
-
+    expect(screen.queryByRole('button', { name: 'Скасувати активацію' })).not.toBeInTheDocument();
+    // правило 03: поки є майбутня активація, план не перебудовують і дзвінки тривог не змінюють
     expect(
-      await screen.findByText(
-        `Активацію з ${formatDate(tomorrow)} скасовано — діє звичайний розклад.`,
-      ),
-    ).toBeInTheDocument();
-    expect(sent).toEqual([{ from: tomorrow }]);
-    expect(screen.queryByText('запланована')).not.toBeInTheDocument();
-    // план знову можна активувати
-    expect(screen.getByRole('button', { name: 'Активувати' })).toBeInTheDocument();
-  });
-
-  it('скасування на старому сервері (422 invalid_date) — пояснення, кнопка вимкнена', async () => {
-    await startMockBackend();
-    const mockFetch = globalThis.fetch;
-    globalThis.fetch = async (input, init) => {
-      if (String(input).endsWith(':end'))
-        return Response.json(
-          { status: 422, code: 'invalid_date', title: 'Некоректна дата повернення' },
-          { status: 422, headers: { 'content-type': 'application/problem+json' } },
-        );
-      return mockFetch(input, init);
-    };
-    onTestFinished(() => {
-      globalThis.fetch = mockFetch;
-    });
-    const { user } = renderPage(<ScenariosPage />);
-    await screen.findByRole('heading', { name: 'Тривоги' });
-    fireEvent.change(screen.getByLabelText('З дати'), {
-      target: { value: addDaysIso(todayKyiv(), 1) },
-    });
-    await user.click(screen.getByRole('button', { name: 'Активувати' }));
-    await user.click(await screen.findByRole('button', { name: 'Скасувати активацію' }));
-    const ask = within(screen.getByRole('dialog', { name: /^Скасувати активацію з/ }));
-    await user.click(ask.getByRole('button', { name: 'Скасувати активацію' }));
-    expect(await ask.findByText(/Сервер ще не вміє скасовувати/)).toBeInTheDocument();
-    expect(ask.getByRole('button', { name: 'Скасувати активацію' })).toBeDisabled();
+      screen.queryByRole('button', { name: /Побудувати план тривог/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Дзвінки тривог' })).not.toBeInTheDocument();
+    expect(screen.getByText(/повністю скасувати не можна/)).toBeInTheDocument();
+    // мок, як сервер і специфікація: дата повернення має бути пізнішою за початок
+    const { timetableApi } = await import('@/api/endpoints');
+    const plan = await timetableApi.alertPlan();
+    await expect(
+      timetableApi.alertEnd(plan.activations[0]!.activation_id, tomorrow),
+    ).rejects.toMatchObject({ status: 422, code: 'invalid_date' });
   });
 
   it('подвійний клік «Повернути звичайний розклад» — один запит :end', async () => {
@@ -244,7 +277,7 @@ describe('Сценарії: розклад тривог', () => {
     await user.click(screen.getByRole('button', { name: 'Активувати' }));
     const back = await screen.findByRole('button', { name: 'Повернути звичайний розклад' });
     await user.dblClick(back);
-    await screen.findByText(new RegExp(`з ${formatDate(todayKyiv())} по `));
+    await screen.findByText(new RegExp(`${formatDate(todayKyiv())} \\(один день\\)`));
     expect(endCalls).toBe(1);
   });
 });
