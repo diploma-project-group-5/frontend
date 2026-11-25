@@ -255,23 +255,36 @@ export function validateTimetable(tt: TimetableDetail): Conflict[] {
   return out;
 }
 
-/** Формула 1.1: учні очних класів + персонал + вчителі з очними уроками ≤ паспортна місткість. */
+/**
+ * Формула 1.1: учні очних класів + персонал + вчителі з очними уроками ≤ паспортна місткість.
+ * Шаблон тривог (1.2) — ще й окрема умова: учні в укритті ≤ облаштовані навчальні місця.
+ */
 export function makeLoad(tt: TimetableDetail): TimetableLoad {
   const limit = profile.shelter_capacity!;
+  const alert = tt.kind === 'alert';
+  const seatsLimit = profile.shelter_seats ?? 0;
   const days = DAYS.map((day) => {
     const p = dayPeople(day, tt.lessons, tt.day_formats);
     const load = dayLoad(day, tt.lessons, tt.day_formats);
+    const seats = alert
+      ? { load: p.students, limit: seatsLimit, ok: p.students <= seatsLimit }
+      : undefined;
     return {
       day,
       students_in_person: p.students,
       teachers_on_site: p.teachers,
       passport: { load, limit, ok: load <= limit },
-      ok: load <= limit,
+      ...(seats ? { seats } : {}),
+      ok: load <= limit && (seats?.ok ?? true),
     };
   });
   const peak = days.reduce((a, b) => (b.passport.load > a.passport.load ? b : a));
+  const seatsPeak = days.reduce((a, b) => ((b.seats?.load ?? 0) > (a.seats?.load ?? 0) ? b : a));
+  const inPerson = new Set(
+    tt.day_formats.filter((f) => f.format === 'in_person').map((f) => f.class_id),
+  );
   return {
-    model: '1.1',
+    model: alert ? '1.2' : '1.1',
     days,
     class_days: tt.day_formats.map((f) => {
       const c = classes.find((x) => x.class_id === f.class_id)!;
@@ -290,21 +303,44 @@ export function makeLoad(tt: TimetableDetail): TimetableLoad {
     summary: {
       remote_class_days: tt.day_formats.filter((f) => f.format === 'remote').length,
       peak: { day: peak.day, load: peak.passport.load, limit },
-      peaks: [{ condition: 'passport', day: peak.day, load: peak.passport.load, limit }],
+      peaks: [
+        ...(alert
+          ? [
+              {
+                condition: 'seats' as const,
+                day: seatsPeak.day,
+                load: seatsPeak.seats!.load,
+                limit: seatsLimit,
+              },
+            ]
+          : []),
+        { condition: 'passport', day: peak.day, load: peak.passport.load, limit },
+      ],
       build_ms: 3200,
-      classes_without_in_person_days: [],
+      classes_without_in_person_days: [
+        ...new Set(tt.day_formats.map((f) => f.class_id).filter((c) => !inPerson.has(c))),
+      ],
     },
     validation: (() => {
       const conflicts: Conflict[] = [
         ...validateTimetable(tt),
         ...days
-          .filter((x) => !x.ok)
+          .filter((x) => !x.passport.ok)
           .map((x) => ({
             rule: 'capacity_exceeded' as const,
             day: x.day,
             condition: 'passport' as const,
             value: x.passport.load,
             limit,
+          })),
+        ...days
+          .filter((x) => x.seats && !x.seats.ok)
+          .map((x) => ({
+            rule: 'capacity_exceeded' as const,
+            day: x.day,
+            condition: 'seats' as const,
+            value: x.seats!.load,
+            limit: seatsLimit,
           })),
       ];
       return { ok: conflicts.length === 0, conflicts };

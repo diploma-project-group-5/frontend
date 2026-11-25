@@ -1,7 +1,7 @@
 import { TZDate } from '@date-fns/tz';
 import { addDays, format, getISOWeek, getISOWeekYear, isWeekend, parseISO } from 'date-fns';
 import { config } from '@/config';
-import type { IsoDate, PublishedPhase } from '@/api/types';
+import type { IsoDate, PublishedPhase, TimetableLoad } from '@/api/types';
 
 /**
  * Модель часу (розділ 04): «сьогодні», ISO-тиждень і «не раніше ніж через 7 днів»
@@ -96,4 +96,13 @@ export const DAY_SHORT = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'] as
 /** Пік навантаження укриття за паспортом: «150 / 160 (Ср)»; сервер дає null, якщо днів немає. */
 export function peakText(p: { day: number; load: number; limit: number } | null): string {
   return p ? `${p.load} / ${p.limit} (${DAY_SHORT[p.day] ?? ''})` : '—';
+}
+
+/** Пік за кожною умовою (1.2 — укриття й навчальні місця), інакше — паспортний пік. */
+export function peaksText(load: Pick<TimetableLoad, 'summary'>): string {
+  const peaks = load.summary.peaks ?? [];
+  if (peaks.length < 2) return peakText(load.summary.peak);
+  return peaks
+    .map((p) => `${p.condition === 'seats' ? 'навчальні місця' : 'укриття'} ${peakText(p)}`)
+    .join(', ');
 }

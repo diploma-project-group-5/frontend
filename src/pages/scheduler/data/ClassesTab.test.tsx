@@ -75,4 +75,18 @@ describe('Дані закладу · Класи', () => {
       expect(screen.queryByRole('cell', { name: /^5-А/ })).not.toBeInTheDocument(),
     );
   });
+
+  it('класи в природному порядку: 2-А перед 10-А (не 10-А, 2-А, 5-А)', async () => {
+    const { schoolApi } = await import('@/api/endpoints');
+    await startMockBackend();
+    await schoolApi.createClass({ name: '10-А', students: 20, in_person_priority: false });
+    await schoolApi.createClass({ name: '2-А', students: 20, in_person_priority: false });
+    renderPage(<ClassesTab />);
+    await screen.findByRole('cell', { name: /^10-А/ });
+    const names = screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((r) => within(r).getAllByRole('cell')[0]!.textContent);
+    expect(names).toEqual(['2-А', '5-А', '5-Б', '6-А', '6-Б', '7-А', '7-Б', '10-А']);
+  });
 });

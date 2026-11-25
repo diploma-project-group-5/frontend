@@ -196,8 +196,17 @@ describe('відсутності й заміни (етап 2), як у timetable
       }),
     ).rejects.toSatisfy((e) => isApiError(e, 'no_lessons'));
 
+    // сид мока погоджує заміну на перший навчальний день від сьогодні, і замісник залежить від дня
+    // тижня — беремо вчителя, який у ці дні не замісник (інакше чесне 409 teacher_is_substitute)
+    const busy = new Set(
+      (await Promise.all([d1!, d2!].map((d) => timetableApi.substitutions(d))))
+        .flat()
+        .filter((x) => x.state === 'approved')
+        .map((x) => x.new_teacher_id),
+    );
+    const teacher = ['t2', 't3', 't4', 't7', 't8'].find((t) => !busy.has(t))!;
     const res = await timetableApi.createAbsence({
-      teacher_id: 't2',
+      teacher_id: teacher,
       date_from: d1!,
       date_to: d2!,
     });

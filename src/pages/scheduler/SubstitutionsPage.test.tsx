@@ -314,4 +314,55 @@ describe('Заміни', () => {
     expect(g.getAllByText('інший вчитель').length).toBeGreaterThan(0);
     expect(g.queryByText('предметник')).not.toBeInTheDocument();
   });
+
+  it('подвійний клік «Внести відсутність» — одна відсутність', async () => {
+    let posts = 0;
+    await startMockBackend();
+    const mockFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (String(input).endsWith('/timetable/absences') && init?.method === 'POST') posts++;
+      return mockFetch(input, init);
+    };
+    onTestFinished(() => {
+      globalThis.fetch = mockFetch;
+    });
+    const { user } = renderPage(<SubstitutionsPage />, {
+      path: '/scheduler/substitutions',
+      url: '/scheduler/substitutions?tab=new',
+    });
+    await user.selectOptions(await screen.findByLabelText('Хто відсутній'), 't8');
+    await user.dblClick(screen.getByRole('button', { name: 'Внести відсутність' }));
+    expect(await screen.findByText(/Відсутність внесено/)).toBeInTheDocument();
+    expect(posts).toBe(1);
+    expect((await timetableApi.absences()).filter((a) => a.teacher_id === 't8')).toHaveLength(1);
+  });
+
+  it('409 stale «Тиждень змінився»: справжня причина, а не «діє інша версія»', async () => {
+    await startMockBackend();
+    const mockFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (String(input).endsWith(':approve'))
+        return Response.json(
+          {
+            status: 409,
+            code: 'stale',
+            title: 'Тиждень змінився',
+            detail: 'Урок пропозиції вже не в цьому слоті; внесіть відсутність знову',
+          },
+          { status: 409 },
+        );
+      return mockFetch(input, init);
+    };
+    onTestFinished(() => {
+      globalThis.fetch = mockFetch;
+    });
+    const { user } = renderPage(<SubstitutionsPage />, {
+      path: '/scheduler/substitutions',
+      url: '/scheduler/substitutions?tab=props',
+    });
+    const g = await group('Ткаченко Г. О.');
+    await user.click(await g.findByRole('button', { name: /Погодити/ }));
+    expect(await g.findByText(/урок уже не в цьому слоті/)).toBeInTheDocument();
+    expect(g.queryByText(/діє інша версія розкладу/)).not.toBeInTheDocument();
+  });
 });

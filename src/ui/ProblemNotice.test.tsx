@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { ApiError } from '@/api/http';
 import { ProblemNotice } from './index';
 
@@ -56,8 +56,27 @@ describe('ProblemNotice: поля даних закладу', () => {
         />
       </QueryClientProvider>,
     );
-    expect(
-      screen.getByText(/Заповніть: паспортна місткість укриття, дзвінки тривог\./),
-    ).toBeInTheDocument();
+    const text = screen.getByRole('alert').textContent;
+    expect(text).toMatch(/Заповніть: паспортна місткість укриття\./);
+    // дзвінки тривог — не поле профілю: окреме речення з тим, де їх задати
+    expect(text).toMatch(/Дзвінки тривог не задано: задайте їх у блоці «Дзвінки тривог»/);
+    expect(text).not.toMatch(/Заповніть:.*дзвінки тривог/);
+  });
+
+  it('сторінки шлюзу (502/503/429, не JSON) — український текст, а не сирий HTML', () => {
+    const showStatus = (status: number, body: Record<string, unknown>) =>
+      render(
+        <QueryClientProvider client={new QueryClient()}>
+          <ProblemNotice error={new ApiError(status, body)} />
+        </QueryClientProvider>,
+      );
+    showStatus(502, { unexpected: true });
+    expect(screen.getByRole('alert')).toHaveTextContent(/неочікуваному форматі/);
+    cleanup();
+    showStatus(503, {});
+    expect(screen.getByRole('alert')).toHaveTextContent(/Сервіс тимчасово недоступний/);
+    cleanup();
+    showStatus(429, {});
+    expect(screen.getByRole('alert')).toHaveTextContent(/Забагато запитів/);
   });
 });

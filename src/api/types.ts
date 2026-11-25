@@ -218,7 +218,9 @@ export interface Job {
   created_at: IsoDateTime;
   started_at: IsoDateTime | null;
   conflicts?: Conflict[];
-  result?: { timetable_id: Uuid } | { alert_plan: true } | { proposals: unknown[] };
+  /** build_alert: { alert_plan: true, timetable_id } — шаблон тривог, а не чернетка (jobs.ts) */
+  result?:
+    { timetable_id: Uuid } | { alert_plan: true; timetable_id?: Uuid } | { proposals: unknown[] };
   /**
    * Код збою для failed / rejected (contracts 0.4.0), напр. `unsupported_job_type` — solver
    * без рушія замін одразу відповідає на задачу substitution відмовою.

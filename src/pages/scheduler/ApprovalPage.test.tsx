@@ -54,4 +54,24 @@ describe('Погодження й публікація', () => {
     await user.click(screen.getByRole('button', { name: 'Опублікувати' }));
     expect((await timetableApi.get(draft.timetable_id)).state).toBe('validated');
   });
+
+  it('реквізити наказу йдуть на сервер обрізаними; у поясненні немає машинного «stale»', async () => {
+    const { user, draft } = await setup();
+    const mockFetch = globalThis.fetch;
+    let sent: Record<string, unknown> | null = null;
+    globalThis.fetch = async (input, init) => {
+      if (String(input).endsWith(':publish')) sent = JSON.parse(String(init?.body));
+      return mockFetch(input, init);
+    };
+    onTestFinished(() => {
+      globalThis.fetch = mockFetch;
+    });
+    await user.type(await screen.findByLabelText('Наказ №'), '  41-о  ');
+    await user.type(screen.getByLabelText('Затвердив'), '  Директорка  ');
+    await user.click(screen.getByRole('button', { name: 'Опублікувати' }));
+    await vi.waitFor(() => expect(sent).not.toBeNull());
+    expect(sent).toMatchObject({ order_no: '41-о', approved_by: 'Директорка' });
+    expect(draft).toBeDefined();
+    expect(document.body.textContent).not.toMatch(/stale/);
+  });
 });

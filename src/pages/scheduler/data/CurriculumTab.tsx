@@ -6,6 +6,7 @@ import type { CurriculumRow } from '@/api/types';
 import { useUnsavedChanges } from '@/lib/unsaved';
 import { Button, Chip, Notice, ProblemNotice, Spinner } from '@/ui';
 import s from './DataPages.module.css';
+import { sortByLabel } from '@/lib/sort';
 
 type Cell = { hours: number; teacher_id: string | null };
 const key = (classId: string, subjectId: string) => `${classId}|${subjectId}`;
@@ -66,7 +67,10 @@ export function CurriculumTab() {
     setDraft(new Map(cells).set(key(c, x), v));
   };
 
-  const activeClasses = classes.data.filter((c) => !c.archived_at);
+  const activeClasses = sortByLabel(
+    classes.data.filter((c) => !c.archived_at),
+    (c) => c.name,
+  );
   const activeSubjects = subjects.data.filter((x) => !x.archived_at);
   const activeTeachers = teachers.data.filter((t) => !t.deleted_at);
   const days = profile.data?.saturday ? 6 : 5;

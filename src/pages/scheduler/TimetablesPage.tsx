@@ -3,14 +3,15 @@ import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { schoolApi, timetableApi } from '@/api/endpoints';
 import { isApiError } from '@/api/http';
-import type { Day, Lesson, TimetableLoad, TimetableSummary } from '@/api/types';
+import type { Day, Job, Lesson, LimitUsage, TimetableLoad, TimetableSummary } from '@/api/types';
 import { isTerminal, JOB_STATE_LABEL, jobErrorText, useJob } from '@/api/useJob';
 import { useSingleFlight } from '@/api/useSingleFlight';
 import { useAuth } from '@/auth/AuthContext';
 import { conflictNames, describeConflict, useConflictNames } from '@/lib/conflicts';
 import { reasonText } from '@/lib/reasons';
 import { activeBuildJobKey } from '@/lib/session';
-import { DAY_SHORT, formatDate, peakText, publishedPhase, todayKyiv } from '@/lib/time';
+import { sortByLabel } from '@/lib/sort';
+import { DAY_SHORT, formatDate, peaksText, publishedPhase, todayKyiv } from '@/lib/time';
 import { Badge, Button, Chip, Notice, PageHeader, ProblemNotice, Spinner } from '@/ui';
 import { IconOk, IconRefresh, IconWarn } from '@/ui/icons';
 import s from './TimetablesPage.module.css';
@@ -193,6 +194,8 @@ function JobStatus({
     );
   }
   const j = job.data;
+  // 409 build_in_progress повертає job_id будь-якої побудови закладу — і плану тривог зі «Сценаріїв»
+  if (j.kind === 'build_alert') return <AlertBuildStatus job={j} onDismiss={onDismiss} />;
   if (!isTerminal(j)) {
     return (
       <Notice tone="info">
@@ -200,8 +203,8 @@ function JobStatus({
       </Notice>
     );
   }
-  if (j.state === 'done' && j.result && 'timetable_id' in j.result) {
-    const vid = j.result.timetable_id;
+  const vid = j.state === 'done' && j.result && 'timetable_id' in j.result && j.result.timetable_id;
+  if (vid) {
     return (
       <Notice tone="ok">
         <p>
@@ -227,6 +230,25 @@ function JobStatus({
           ))}
         </ul>
       )}
+    </Notice>
+  );
+}
+
+/** Чернетку не побудовано: заклад зайнятий побудовою плану тривог. */
+function AlertBuildStatus({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
+  if (!isTerminal(job)) {
+    return (
+      <Notice tone="info">
+        <Spinner label="Зараз будується план тривог (розділ «Сценарії»). Чернетку основного розкладу можна буде побудувати після його завершення." />
+      </Notice>
+    );
+  }
+  return (
+    <Notice tone="info">
+      <p>
+        Побудову плану тривог завершено — чернетку основного розкладу не будували. Натисніть
+        «Побудувати чернетку» ще раз. <button onClick={onDismiss}>Закрити</button>
+      </p>
     </Notice>
   );
 }
@@ -293,6 +315,12 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
   });
   const subjects = useQuery({ queryKey: ['subjects'], queryFn: schoolApi.listSubjects });
   const bells = useQuery({ queryKey: ['bells'], queryFn: schoolApi.getBells });
+  // шаблон тривог іде за дзвінками тривог, а не основними (і їх кількістю уроків)
+  const alertPlan = useQuery({
+    queryKey: ['alert-plan'],
+    queryFn: timetableApi.alertPlan,
+    enabled: tt.data?.kind === 'alert',
+  });
   const profile = useQuery({ queryKey: ['profile'], queryFn: schoolApi.getProfile });
   // назви для conflicts[]: копії класів і підписів із версії (там і «Вчитель #N»), предмети — з закладу
   const names = conflictNames({
@@ -352,7 +380,14 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
   const editable = v.kind === 'main' && v.state === 'validated';
   const days = [...new Set(v.day_formats.map((f) => f.day))].sort() as Day[];
   const d = day ?? days[0] ?? 1;
-  const perDay = Math.max(profile.data?.lessons_per_day ?? 0, ...v.lessons.map((l) => l.lesson_no));
+  const alert = v.kind === 'alert';
+  const dayBells = alert ? alertPlan.data?.bells : bells.data;
+  const perDay = Math.max(
+    (alert ? alertPlan.data?.bells.length : profile.data?.lessons_per_day) ?? 0,
+    ...v.lessons.map((l) => l.lesson_no),
+  );
+  // назви як читає людина: 1-А, 2-А … 10-А, а не порядок відповіді сервера
+  const classes = sortByLabel(v.classes, (c) => c.name);
   const lessonAt = (x: Slot) => v.lessons.find((l) => sameSlot(l, x));
   const subjectName = (sid: string) =>
     subjects.data?.find((x) => x.subject_id === sid)?.name ?? '…';
@@ -366,6 +401,10 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
         x !== l && x.teacher_id === l.teacher_id && x.day === l.day && x.lesson_no === l.lesson_no,
     );
   const dayLoad = (dd: Day) => load.data?.days.find((x) => x.day === dd)?.passport;
+  // модель 1.2: окрема умова «учні ≤ облаштовані навчальні місця»
+  const daySeats = (dd: Day) => load.data?.days.find((x) => x.day === dd)?.seats;
+  const isOver = (x: LimitUsage | undefined) => !!x && x.load > x.limit;
+  const withoutInPerson = (load.data?.summary.classes_without_in_person_days ?? []).map(className);
   const conflicts = load.data?.validation.conflicts ?? [];
 
   const tryMove = (from: Slot, to: Slot) => {
@@ -455,16 +494,18 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
       <div className={s.dtabs} style={{ ['--n' as string]: days.length }}>
         {days.map((dd) => {
           const x = dayLoad(dd);
+          const st = daySeats(dd);
           return (
             <button
               key={dd}
               type="button"
-              className={`${s.dtab} ${x && x.load > x.limit ? s.dtabOver : ''}`}
+              className={`${s.dtab} ${isOver(x) || isOver(st) ? s.dtabOver : ''}`}
               aria-pressed={dd === d}
               onClick={() => setDay(dd)}
             >
               <b>{DAY_SHORT[dd]}</b>
               <small>{x ? `укриття ${x.load}/${x.limit}` : '…'}</small>
+              {st && <small>{`місця ${st.load}/${st.limit}`}</small>}
             </button>
           );
         })}
@@ -490,6 +531,15 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
               </span>
               <span className="muted">клацніть формат класу, щоб побачити причину</span>
             </div>
+          )}
+          {daySeats(d) && <SeatsLine usage={daySeats(d)!} day={d} />}
+          {withoutInPerson.length > 0 && (
+            <Notice tone="warn">
+              <p>
+                Класи без жодного очного дня на тижні: {withoutInPerson.join(', ')}. Правила
+                «мінімум очних днів» немає — перевірте, чи це прийнятно.
+              </p>
+            </Notice>
           )}
           {!load.data?.validation.ok && conflicts.length > 0 && (
             <Notice tone="bad">
@@ -533,7 +583,7 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
                 <tr>
                   <th className={s.cls}>Клас</th>
                   {Array.from({ length: perDay }, (_, i) => {
-                    const b = bells.data?.find((x) => x.lesson_no === i + 1);
+                    const b = dayBells?.find((x) => x.lesson_no === i + 1);
                     return (
                       <th key={i}>
                         {i + 1} урок
@@ -544,7 +594,7 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
                 </tr>
               </thead>
               <tbody>
-                {v.classes.map((c) => {
+                {classes.map((c) => {
                   const f = formatOf(c.class_id, d);
                   return (
                     <tr key={c.class_id} className={f === 'remote' ? s.out : undefined}>
@@ -625,7 +675,8 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
           {load.data && (
             <p className="muted">
               Дистанційних класо-днів: {load.data.summary.remote_class_days} · пік:{' '}
-              {peakText(load.data.summary.peak)} · модель {v.model}
+              {peaksText(load.data)} · класів без очних днів: {withoutInPerson.length} · модель{' '}
+              {v.model}
             </p>
           )}
         </div>
@@ -644,7 +695,7 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
               </tr>
             </thead>
             <tbody>
-              {v.classes.map((c) => (
+              {classes.map((c) => (
                 <tr key={c.class_id}>
                   <td>{c.name}</td>
                   {days.map((dd) => {
@@ -673,6 +724,27 @@ function Editor({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
         </aside>
       </div>
     </>
+  );
+}
+
+function SeatsLine({ usage: u, day }: { usage: LimitUsage; day: Day }) {
+  const over = u.load > u.limit;
+  const max = Math.max(u.limit, u.load) * 1.04 || 1;
+  return (
+    <div className={s.dload}>
+      <span>
+        Навчальні місця в укритті, {DAY_FULL[day]}:{' '}
+        <b className={over ? s.over : undefined}>
+          {u.load} / {u.limit}
+        </b>{' '}
+        учнів
+      </span>
+      <span className={s.bar}>
+        <i className={over ? s.over : undefined} style={{ width: `${(u.load / max) * 100}%` }} />
+        <b style={{ left: `${(u.limit / max) * 100}%` }} />
+      </span>
+      <span className="muted">модель 1.2: учні в укритті ≤ облаштовані навчальні місця</span>
+    </div>
   );
 }
 

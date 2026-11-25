@@ -3,9 +3,10 @@ import { useState, type FormEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { useSearchParams } from 'react-router';
 import { schoolApi, timetableApi } from '@/api/endpoints';
-import { isApiError } from '@/api/http';
+import { isApiError, type ApiError } from '@/api/http';
 import type { Absence, AbsenceAccepted, Bell, Lesson, Substitution } from '@/api/types';
 import { isTerminal, JOB_STATE_LABEL, jobErrorText } from '@/api/useJob';
+import { useSingleFlight } from '@/api/useSingleFlight';
 import { config } from '@/config';
 import { conflictNames, describeConflict, type ConflictNames } from '@/lib/conflicts';
 import {
@@ -234,6 +235,8 @@ function NewAbsence({ onCreated }: { onCreated: (res: AbsenceAccepted) => void }
       onCreated(res);
     },
   });
+  // POST /absences не ідемпотентний: подвійний клік давав дві відсутності й дві задачі заміни
+  const createOnce = useSingleFlight(create);
 
   if (ctx.error) return <ProblemNotice error={ctx.error} />;
   if (!ctx.ready) return <Spinner />;
@@ -261,7 +264,7 @@ function NewAbsence({ onCreated }: { onCreated: (res: AbsenceAccepted) => void }
     if (dTo < dFrom) return setError('Дата «по» раніша за «з».');
     if (mode === 'part' && !lessonNos.length) return setError('Оберіть хоча б один урок.');
     setError(null);
-    create.mutate();
+    createOnce();
   };
 
   return (
@@ -417,7 +420,7 @@ function NewAbsence({ onCreated }: { onCreated: (res: AbsenceAccepted) => void }
               <Button
                 type="submit"
                 variant="primary"
-                disabled={create.isPending || (previewReady && total === 0)}
+                disabled={create.isPending || entered === sent || (previewReady && total === 0)}
               >
                 {create.isPending ? 'Вносимо…' : 'Внести відсутність'}
               </Button>
@@ -477,6 +480,7 @@ function AbsenceCard({ absence: a, ctx }: { absence: Absence; ctx: Ctx }) {
       void qc.invalidateQueries({ queryKey: ['substitutions'] });
     },
   });
+  const cancelOnce = useSingleFlight(cancel);
   const who = label(ctx.names, 'teachers', a.teacher_id);
   const period =
     a.date_from === a.date_to
@@ -509,7 +513,7 @@ function AbsenceCard({ absence: a, ctx }: { absence: Absence; ctx: Ctx }) {
         {cancel.error && <ProblemNotice error={cancel.error} />}
         <ModalActions>
           <Button onClick={() => setConfirm(false)}>Залишити</Button>
-          <Button variant="danger" disabled={cancel.isPending} onClick={() => cancel.mutate()}>
+          <Button variant="danger" disabled={cancel.isPending} onClick={() => cancelOnce()}>
             Скасувати відсутність
           </Button>
         </ModalActions>
@@ -563,6 +567,9 @@ function JobGroup({ job, ctx }: { job: Absence['jobs'][number]; ctx: Ctx }) {
     mutationFn: () => timetableApi.rejectSubstitution(job.job_id),
     onSuccess: settle,
   });
+  // подвійний клік: другий :approve/:reject лише пише зайвий запис у журнал
+  const approveOnce = useSingleFlight(approve);
+  const rejectOnce = useSingleFlight(reject);
 
   const v = versionIdAt(job.date, ctx.versions, ctx.alertPlan);
   const bells: Bell[] = v?.alert ? (ctx.alertPlan?.bells ?? []) : ctx.bells;
@@ -669,7 +676,7 @@ function JobGroup({ job, ctx }: { job: Absence['jobs'][number]; ctx: Ctx }) {
               <Button
                 size="sm"
                 disabled={approve.isPending || reject.isPending}
-                onClick={() => reject.mutate()}
+                onClick={() => rejectOnce()}
               >
                 Відхилити
               </Button>
@@ -677,7 +684,7 @@ function JobGroup({ job, ctx }: { job: Absence['jobs'][number]; ctx: Ctx }) {
                 size="sm"
                 variant="primary"
                 disabled={approve.isPending || reject.isPending}
-                onClick={() => approve.mutate()}
+                onClick={() => approveOnce()}
               >
                 <IconOk width={14} height={14} />
                 Погодити
@@ -816,14 +823,23 @@ function CoveringLessons({ lessons, names }: { lessons: unknown; names: Conflict
 }
 
 /** Відмови :approve / :reject людськими словами (коди — README timetable-service). */
+/**
+ * Три різні 409 stale на :approve (timetable substitutions.ts): на дату діє інша версія; урок
+ * пропозиції вже не в цьому слоті (тиждень змінився); пропозиція не вкладається в тиждень (issues[]).
+ */
+function staleReason(error: ApiError): string {
+  if (Array.isArray(error.body.issues))
+    return 'Після пропозиції тиждень змінився, і вона в нього більше не вкладається.';
+  if (/слот|тиждень змінився/i.test(`${error.title} ${error.detail ?? ''}`))
+    return 'Після пропозиції тиждень змінився: урок уже не в цьому слоті (його перенесли або на нього погодили іншу заміну).';
+  return 'На цю дату вже діє інша версія розкладу, і пропозиція їй не відповідає.';
+}
+
 function DecisionError({ error }: { error: unknown }) {
   if (isApiError(error, 'stale'))
     return (
       <Notice tone="bad">
-        <p>
-          На цю дату вже діє інша версія розкладу, і пропозиція їй не відповідає. Скасуйте
-          відсутність і внесіть її знову.
-        </p>
+        <p>{staleReason(error)} Скасуйте відсутність і внесіть її знову.</p>
       </Notice>
     );
   if (isApiError(error, 'slot_taken'))

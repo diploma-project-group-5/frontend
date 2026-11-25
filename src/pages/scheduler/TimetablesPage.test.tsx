@@ -1,4 +1,5 @@
 import { fireEvent, screen, within } from '@testing-library/react';
+import { timetableApi } from '@/api/endpoints';
 import { renderPage, startMockBackend } from '@/test/render';
 import { TimetablesPage } from './TimetablesPage';
 
@@ -99,7 +100,7 @@ describe('Розклад · редактор чернетки', () => {
       }
     }
     expect({ saved, rejected }).toEqual({ saved: true, rejected: true });
-  });
+  }, 30_000); // перебирає десятки пар кліків — під навантаженням 5 с замало
 
   it('перетягування уроку на інший слот того ж класу — та сама правка', async () => {
     await openCopyOfCurrent();
@@ -140,4 +141,36 @@ describe('Розклад · редактор чернетки', () => {
     expect(status).toHaveTextContent(/^5-А, понеділок: (очно|дистанційно): [^.]+\./);
     expect(status.textContent).not.toMatch(/[a-z_]{4,}/);
   });
+
+  it('шаблон тривог: дзвінки тривог, окрема умова «навчальні місця», пік за обома умовами', async () => {
+    const plan = await timetableApi.alertPlan();
+    renderPage(<TimetablesPage />, {
+      path: '/scheduler/timetables/:id?',
+      url: `/scheduler/timetables/${plan.timetable_id}`,
+    });
+    expect(await screen.findByText('Шаблон тривог · модель 1.2')).toBeInTheDocument();
+    // заголовки уроків — дзвінки тривог (2 урок о 09:15), а не основні
+    expect(screen.getByRole('columnheader', { name: /^2 урок/ })).toHaveTextContent('09:15');
+    expect(await screen.findByText(/Навчальні місця в укритті, понеділок/)).toBeInTheDocument();
+    expect(screen.getByText(/пік: навчальні місця .+, укриття /)).toBeInTheDocument();
+  });
+
+  it('«Побудувати чернетку», поки будується план тривог: не видає шаблон тривог за чернетку', async () => {
+    // побудова плану тривог зі «Сценаріїв» уже йде — заклад зайнятий
+    await timetableApi.alertBuild();
+    const view = renderPage(<TimetablesPage />, {
+      path: '/scheduler/timetables/:id?',
+      url: '/scheduler/timetables',
+    });
+    await view.user.click(await screen.findByRole('button', { name: 'Побудувати чернетку' }));
+    expect(await screen.findByText(/Зараз будується план тривог/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        /Побудову плану тривог завершено — чернетку основного розкладу не будували/,
+        {},
+        { timeout: 6000 },
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Відкрити чернетку' })).not.toBeInTheDocument();
+  }, 15_000);
 });

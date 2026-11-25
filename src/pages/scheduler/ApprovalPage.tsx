@@ -4,7 +4,8 @@ import { Link, useSearchParams } from 'react-router';
 import { timetableApi } from '@/api/endpoints';
 import type { PublishResponse, TimetableDetail } from '@/api/types';
 import { mainPhases } from '@/lib/phases';
-import { DAY_SHORT, peakText, todayKyiv } from '@/lib/time';
+import { compareLabels, sortByLabel } from '@/lib/sort';
+import { DAY_SHORT, peaksText, todayKyiv } from '@/lib/time';
 import { Card, FormatBadge, Notice, PageHeader, ProblemNotice, Spinner, Stack } from '@/ui';
 import { PublishedNotice, PublishForm } from './PublishForm';
 
@@ -62,8 +63,8 @@ export function ApprovalPage() {
             <Notice tone="warn">
               <p>
                 Дані закладу змінилися після побудови. Під час публікації версію перевірять на
-                свіжих даних; якщо вона їх порушує — сервер поверне «stale» і доведеться
-                перебудувати.
+                свіжих даних; якщо вона їх порушує, опублікувати її не вийде — доведеться
+                перебудувати. Навантаження нижче пораховано за даними на момент побудови.
               </p>
             </Notice>
           )}
@@ -73,6 +74,7 @@ export function ApprovalPage() {
               key={selected.timetable_id}
               id={selected.timetable_id}
               currentId={current?.timetable_id}
+              changed={!!selected.data_changed_since_build}
             />
           )}
 
@@ -93,7 +95,16 @@ export function ApprovalPage() {
 }
 
 /** Зміни формату днів класів відносно чинної версії — що відчують родини. */
-function ChangesVsCurrent({ id, currentId }: { id: string; currentId?: string }) {
+function ChangesVsCurrent({
+  id,
+  currentId,
+  changed,
+}: {
+  id: string;
+  currentId?: string;
+  /** дані закладу змінилися після побудови — ліміти в піку застарілі */
+  changed: boolean;
+}) {
   const next = useQuery({ queryKey: ['timetable', id], queryFn: () => timetableApi.get(id) });
   const cur = useQuery({
     queryKey: ['timetable', currentId],
@@ -109,6 +120,9 @@ function ChangesVsCurrent({ id, currentId }: { id: string; currentId?: string })
   if (next.error) return <ProblemNotice error={next.error} />;
 
   const rows = cur.data ? formatChanges(cur.data, next.data) : [];
+  const without = (load.data?.summary.classes_without_in_person_days ?? []).map(
+    (cid) => next.data.classes.find((c) => c.class_id === cid)?.name ?? cid.slice(0, 8),
+  );
 
   return (
     <Card>
@@ -118,8 +132,14 @@ function ChangesVsCurrent({ id, currentId }: { id: string; currentId?: string })
       {load.data && (
         <p className="muted">
           Дистанційних класо-днів: {load.data.summary.remote_class_days} · пік навантаження:{' '}
-          {peakText(load.data.summary.peak)}
+          {peaksText(load.data)}
+          {changed && ' (ліміт на момент побудови)'} · класів без очних днів: {without.length}
         </p>
+      )}
+      {without.length > 0 && (
+        <Notice tone="warn">
+          <p>Класи без жодного очного дня на тижні: {sortByLabel(without, (x) => x).join(', ')}.</p>
+        </Notice>
       )}
       {cur.data &&
         (rows.length === 0 ? (
@@ -153,7 +173,7 @@ function ChangesVsCurrent({ id, currentId }: { id: string; currentId?: string })
 }
 
 function formatChanges(cur: TimetableDetail, next: TimetableDetail) {
-  return next.day_formats
+  const rows = next.day_formats
     .map((f) => {
       const was = cur.day_formats.find((x) => x.class_id === f.class_id && x.day === f.day)?.format;
       return {
@@ -165,4 +185,6 @@ function formatChanges(cur: TimetableDetail, next: TimetableDetail) {
       };
     })
     .filter((r) => r.was !== r.now);
+  // клас за класом (1-А, 2-А … 10-А), у межах класу — за днями
+  return rows.sort((a, b) => compareLabels(a.className, b.className) || a.day - b.day);
 }
